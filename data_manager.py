@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 # --- CONNECT TO SUPABASE ---
 def get_db():
-    return st.connection("supabase", type="sql")
+    return st.connection("supabase", type="sql", dialect="postgresql+psycopg2")
 
 # --- FETCH DATA (Replaces Google Sheets Fetch) ---
 @st.cache_data(ttl=10)
