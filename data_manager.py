@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
-import json
-import os
 
 # --- CONNECT TO SUPABASE ---
 def get_db():
@@ -135,23 +133,55 @@ def get_next_rake_details(df_all, today_ist):
                 pass
     return 1, ""
 
-# --- RESTORED: MISSING WHITEBOARD & OUTAGE FUNCTIONS ---
+# --- RESTORED & UPGRADED: WHITEBOARD & OUTAGES IN POSTGRESQL ---
 def load_whiteboard():
-    if os.path.exists("whiteboard.json"):
-        with open("whiteboard.json", "r") as f:
-            return json.load(f)
+    conn = get_db()
+    try:
+        df = conn.query("SELECT message, updated_by, updated_at FROM whiteboard WHERE id = 1", ttl=0)
+        if not df.empty:
+            return {
+                "message": df.iloc[0]['message'],
+                "updated_by": df.iloc[0]['updated_by'],
+                "updated_at": df.iloc[0]['updated_at']
+            }
+    except Exception:
+        pass
     return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": datetime.now().strftime("%d-%m-%Y %H:%M")}
 
 def save_whiteboard(data):
-    with open("whiteboard.json", "w") as f:
-        json.dump(data, f, indent=4)
+    conn = get_db()
+    with conn.session as s:
+        s.execute(text("""
+            UPDATE whiteboard 
+            SET message=:m, updated_by=:ub, updated_at=:ua 
+            WHERE id=1
+        """), {"m": data['message'], "ub": data['updated_by'], "ua": data['updated_at']})
+        s.commit()
 
 def load_long_outages():
-    if os.path.exists("long_outages.json"):
-        with open("long_outages.json", "r") as f:
-            return json.load(f)
+    conn = get_db()
+    try:
+        df = conn.query("SELECT dept, equip, affects, since_date, since_time, status, rest_date, rest_time FROM long_outages ORDER BY id ASC", ttl=0)
+        if not df.empty:
+            return df.to_dict('records')
+    except Exception:
+        pass
     return []
 
 def save_long_outages(outages_list):
-    with open("long_outages.json", "w") as f:
-        json.dump(outages_list, f, indent=4)
+    conn = get_db()
+    with conn.session as s:
+        # Wipe the old active outages and save the exact current state
+        s.execute(text("TRUNCATE TABLE long_outages"))
+        
+        if outages_list:
+            for o in outages_list:
+                s.execute(text("""
+                    INSERT INTO long_outages (dept, equip, affects, since_date, since_time, status, rest_date, rest_time)
+                    VALUES (:d, :e, :a, :sd, :st, :stat, :rd, :rt)
+                """), {
+                    "d": o.get('dept',''), "e": o.get('equip',''), "a": o.get('affects','BOTH'),
+                    "sd": o.get('since_date',''), "st": o.get('since_time',''),
+                    "stat": o.get('status',''), "rd": o.get('rest_date',''), "rt": o.get('rest_time','')
+                })
+        s.commit()
