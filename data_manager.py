@@ -135,9 +135,18 @@ def get_next_rake_details(df_all, today_ist):
                 pass
     return 1, ""
 
-# For Long Outages, we can keep the local JSON for now, or move it to DB next. 
-# Keeping it JSON for this exact moment ensures we don't break anything while moving Rakes.
-def get_long_outages():
+# --- RESTORED: MISSING WHITEBOARD & OUTAGE FUNCTIONS ---
+def load_whiteboard():
+    if os.path.exists("whiteboard.json"):
+        with open("whiteboard.json", "r") as f:
+            return json.load(f)
+    return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": datetime.now().strftime("%d-%m-%Y %H:%M")}
+
+def save_whiteboard(data):
+    with open("whiteboard.json", "w") as f:
+        json.dump(data, f, indent=4)
+
+def load_long_outages():
     if os.path.exists("long_outages.json"):
         with open("long_outages.json", "r") as f:
             return json.load(f)
