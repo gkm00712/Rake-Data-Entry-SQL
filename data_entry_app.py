@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import config
 import auth
 from data_manager import get_all_excel_data, load_whiteboard, load_long_outages
-from views import notices, form_entry, reports, admin_tools
+from view import notices, form_entry, reports, admin_tools
 
 # 1. Setup & Init
 config.setup_page()
