@@ -24,12 +24,33 @@ def render_migration_tool():
             
             # Map old Google Sheet columns to Supabase database columns
             rename_map = {
-                'Sr. No.': 'sr_no', 'RAKE No': 'rake_no', 'Coal siding/ Company': 'source', 
-                'BOXN / BOBR': 'wagon_spec', 'U/L Duration': 'u_duration', 'Cycle Time': 'r_duration',
-                'Demurrage': 'demurrage', 'REMARKS': 'remarks', 'NTH': 'nth', 'MUTH': 'muth',
-                'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 'GCV': 'gcv', 'VM': 'vm'
+                'Sr. No.': 'sr_no',
+                'RAKE No': 'rake_no',
+                'Coal siding/ Company': 'source',
+                '(BOXN / BOBR)': 'wagon_spec',
+                'Receipt Date/Time': 'receipt_dt',
+                'Placement Date/Time': 'placement_dt',
+                'U/L End Date/Time': 'ul_end_dt',
+                'Rake Rel. Date/Time': 'release_dt',
+                'Unloading Duration': 'u_duration',
+                'Rake Rel. Duration': 'r_duration',
+                'Cycle Time': 'r_duration',
+                'Demurrage (Hrs)': 'demurrage',
+                'REMARKS': 'remarks',
+                'NTH': 'nth',
+                'MUTH': 'muth',
+                'WT-1': 'wt1',
+                'WT-2': 'wt2',
+                'WT-3': 'wt3',
+                'WT-4': 'wt4',
+                'GCV': 'gcv',
+                'VM': 'vm'
             }
             df_mig = df_mig.rename(columns=rename_map)
+            
+            # Keep only columns that match our database schema
+            valid_columns = list(rename_map.values())
+            df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
             
             # Use raw SQLAlchemy engine with psycopg2 directly from secrets
             from sqlalchemy import create_engine
