@@ -1,4 +1,6 @@
 import streamlit as st
+import time
+from datetime import datetime, timedelta
 import config
 from data_manager import save_whiteboard, save_long_outages
 
@@ -26,7 +28,6 @@ def render_header(now_ist):
             st.rerun()
 
 def render_whiteboard(wb_data):
-    # wb_data is now a dictionary containing single message info from Supabase
     msg_text = wb_data.get("message", "Welcome to CHP-O Data Entry.")
     updated_by = wb_data.get("updated_by", "System")
     updated_at = wb_data.get("updated_at", "")
