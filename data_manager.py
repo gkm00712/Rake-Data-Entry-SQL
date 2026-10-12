@@ -66,17 +66,20 @@ def save_new_rake_entry(entry_dict):
 def save_rake_to_db(entry_dict):
     return save_new_rake_entry(entry_dict)
 
-def get_next_rake_details(df_all):
+def get_next_rake_details(df_all, today_ist):
     try:
+        current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
+        fy_str = f"{str(current_fy)[-2:]}-{str(current_fy + 1)[-2:]}"
+        
         if df_all.empty or 'sr_no' not in df_all.columns:
-            return 1, "001/001"
+            return 1, f"001/{fy_str}"
+            
         max_sr = int(df_all['sr_no'].max()) + 1
-        return max_sr, f"{max_sr:03d}"
+        return max_sr, f"{max_sr:03d}/{fy_str}"
     except Exception:
-        return 1, "001/001"
+        return 1, "001/26-27"
 
 def lookup_gcv_vm(source_name):
-    # Default fallback lookup if needed by form entry
     return 3500, 20.0
 
 @st.cache_data(ttl=10)
