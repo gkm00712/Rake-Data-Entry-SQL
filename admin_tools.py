@@ -1,0 +1,234 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import requests
+import config
+import utils
+from data_manager import get_all_excel_data
+import plotly.express as px
+import re  
+
+cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
+
+def render_yearly_tab(df_all, today_ist):
+    st.info("💡 Yearly reports are based on the Financial Year (April 1st to March 31st).")
+    current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
+    y_only_sel = st.number_input("Target Financial Year (Start Year e.g., 2025 for FY 25-26):", value=current_fy, step=1, key="y_only")
+    
+    if st.button("🔍 Generate Yearly", type="primary"):
+        with st.spinner("Compiling..."):
+            if not df_all.empty and 'Parsed_Date' in df_all.columns:
+                filtered_df = df_all[df_all['Parsed_Date'].apply(lambda d: (d.year if d.month >= 4 else d.year - 1) == y_only_sel if pd.notnull(d) else False)]
+                
+                if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
+                else:
+                    display_df = filtered_df.drop(columns=[c for c in cols_to_drop if c in filtered_df.columns], errors='ignore')
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    st.download_button(f"💾 Download FY {y_only_sel}-{y_only_sel+1} Annual", utils.generate_formatted_excel(filtered_df), file_name=f"Annual_Report_FY_{y_only_sel}_{y_only_sel+1}.xlsx")
+
+def render_mine_wise(df_all, today_ist):
+    st.markdown("### 🏭 Mine-Wise Rake Summary")
+    st.info("View the total number of rakes received from each Coal Siding or by Parent Company.")
+    
+    report_type = st.radio("Report Type:", ["Monthly", "Yearly"], horizontal=True, key="mw_type")
+    
+    group_by = st.radio("Group Data By:", ["Exact Siding Name (e.g., KDH / CCL)", "Parent Company Only (e.g., CCL)"], horizontal=True, key="mw_group")
+    
+    cm1, cm2 = st.columns(2, gap="small")
+    current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
+    
+    if report_type == "Monthly":
+        with cm1: mw_month = st.selectbox("Select Month:", range(1, 13), index=today_ist.month - 1, key="mw_month")
+        with cm2: mw_year = st.number_input("Select Year:", value=today_ist.year, step=1, key="mw_year")
+    else:
+        with cm1: mw_year = st.number_input("Select Financial Year (Start Year):", value=current_fy, step=1, key="mw_year")
+        mw_month = None
+    
+    if st.button(f"📊 Generate {report_type} Report", type="primary"):
+        with st.spinner("Calculating totals..."):
+            if not df_all.empty and 'Parsed_Date' in df_all.columns:
+                if report_type == "Monthly": mask = df_all['Parsed_Date'].apply(lambda d: d.month == mw_month and d.year == mw_year if pd.notnull(d) else False)
+                else: mask = df_all['Parsed_Date'].apply(lambda d: (d.year if d.month >= 4 else d.year - 1) == mw_year if pd.notnull(d) else False)
+                    
+                filtered_df = df_all[mask]
+                if filtered_df.empty:
+                    if report_type == "Monthly": st.warning(f"No records found for {mw_month:02d}/{mw_year}.")
+                    else: st.warning(f"No records found for FY {mw_year}-{mw_year+1}.")
+                elif 'Coal siding/ Company' in filtered_df.columns:
+                    df_mine = filtered_df.copy()
+                    df_mine['Coal siding/ Company'] = df_mine['Coal siding/ Company'].astype(str).str.strip().str.upper()
+                    
+                    if "Company Only" in group_by:
+                        def extract_company(val):
+                            if '/' in val: return val.split('/')[-1].strip()
+                            if '-' in val: return val.split('-')[-1].strip()
+                            return val
+                        df_mine['Target_Column'] = df_mine['Coal siding/ Company'].apply(extract_company)
+                        display_name = 'Parent Company'
+                    else:
+                        df_mine['Target_Column'] = df_mine['Coal siding/ Company']
+                        display_name = 'Coal Siding'
+
+                    summary_df = df_mine.groupby('Target_Column').size().reset_index(name='Total Rakes')
+                    summary_df = summary_df.sort_values(by='Total Rakes', ascending=False).reset_index(drop=True)
+                    summary_df = summary_df.rename(columns={'Target_Column': display_name})
+                    
+                    if not summary_df.empty:
+                        fig = px.pie(
+                            summary_df, 
+                            values='Total Rakes', 
+                            names=display_name, 
+                            title=f"Distribution of Rakes by {display_name} ({report_type})",
+                            hole=0.4
+                        )
+                        fig.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    total_rakes = summary_df['Total Rakes'].sum()
+                    summary_df.loc[len(summary_df)] = ['TOTAL SUM', total_rakes]
+                    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                else:
+                    st.error("Column 'Coal siding/ Company' not found in data.")
+
+def render_bunching_report(df_all, today_ist):
+    st.markdown("<hr style='margin:1em 0;'>", unsafe_allow_html=True)
+    st.markdown("### ⏱️ Master Bunching Summary Report")
+    st.info("Dynamically calculates missing bunching for dates before Apr 1, 2026. Strictly reads official Google Sheet remarks for dates on or after Apr 1, 2026.")
+
+    # --- DATE FILTERS ---
+    report_type = st.radio("Select Timeframe:", ["Daily", "Monthly", "Financial Year", "Custom Range"], horizontal=True, key="br_type")
+
+    cm1, cm2 = st.columns(2, gap="small")
+    current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
+
+    if report_type == "Daily":
+        with cm1: target_date = st.date_input("Select Date:", value=today_ist, key="br_date")
+    elif report_type == "Monthly":
+        with cm1: br_month = st.selectbox("Select Month:", range(1, 13), index=today_ist.month - 1, key="br_mon")
+        with cm2: br_year = st.number_input("Select Year:", value=today_ist.year, step=1, key="br_yr")
+    elif report_type == "Financial Year":
+        with cm1: br_fy = st.number_input("Select Financial Year (Start Year):", value=current_fy, step=1, key="br_fy")
+    elif report_type == "Custom Range":
+        with cm1: date_range = st.date_input("Select Date Range:", value=(today_ist - timedelta(days=7), today_ist), key="br_range")
+
+    if st.button("📊 Calculate Total Bunching", type="primary"):
+        with st.spinner("Extracting bunching data..."):
+            if df_all.empty or 'Parsed_DateTime' not in df_all.columns:
+                st.error("No valid data available.")
+                return
+
+            # Safely create a Date-only column for flawless filtering
+            df_all['Just_Date'] = df_all['Parsed_DateTime'].apply(lambda x: x.date() if pd.notnull(x) else None)
+
+            if report_type == "Daily":
+                mask = df_all['Just_Date'] == target_date
+            elif report_type == "Monthly":
+                mask = df_all['Just_Date'].apply(lambda d: d.month == br_month and d.year == br_year if d else False)
+            elif report_type == "Financial Year":
+                mask = df_all['Just_Date'].apply(lambda d: (d.year if d.month >= 4 else d.year - 1) == br_fy if d else False)
+            elif report_type == "Custom Range":
+                if len(date_range) == 2:
+                    mask = (df_all['Just_Date'] >= date_range[0]) & (df_all['Just_Date'] <= date_range[1])
+                else:
+                    st.error("Please select a complete start and end date.")
+                    return
+
+            filtered_df = df_all[mask].copy()
+
+            if filtered_df.empty:
+                st.warning("No rakes found for the selected period.")
+                return
+
+            # --- STEP 1: SCAN ENTIRE HISTORY FOR MISSED PRE-APRIL 2026 BUNCHING ---
+            # FIX: Added str(x) to prevent TypeError on blank cells!
+            df_boxn = df_all[df_all['(BOXN / BOBR)'].astype(str).str.upper().apply(lambda x: 'N' in str(x) and 'R' not in str(x))].copy()
+            df_boxn = df_boxn.dropna(subset=['Parsed_DateTime']).sort_values(by='Parsed_DateTime', ascending=True)
+
+            missing_bunching_map = {}
+            for i in range(2, len(df_boxn)):
+                rake_1, rake_3 = df_boxn.iloc[i-2], df_boxn.iloc[i]
+                dt_1, dt_3 = rake_1.get('Parsed_DateTime'), rake_3.get('Parsed_DateTime')
+                if pd.notnull(dt_1) and pd.notnull(dt_3) and isinstance(dt_1, datetime) and isinstance(dt_3, datetime):
+                    dt_1_aware, dt_3_aware = config.IST.localize(dt_1), config.IST.localize(dt_3)
+                    
+                    if dt_3_aware > dt_1_aware and dt_3_aware <= (dt_1_aware + timedelta(hours=5)):
+                        b_sec = (dt_1_aware + timedelta(hours=5) - dt_3_aware).total_seconds()
+                        if b_sec > 0:
+                            b_hrs, b_mins = int(b_sec // 3600), int((b_sec % 3600) // 60)
+                            current_remarks = str(rake_3.get('REMARKS', ''))
+                            # If it's legitimately missing from the remarks, map it!
+                            if "BUNCHING" not in current_remarks.upper():
+                                missing_bunching_map[rake_3['RAKE No']] = (b_hrs, b_mins)
+
+            # --- STEP 2: COMPILE THE FINAL FILTERED REPORT ---
+            bunching_data = []
+            total_bunching_minutes = 0
+            cutoff_date = config.IST.localize(datetime(2026, 4, 1, 0, 0))
+
+            for _, row in filtered_df.iterrows():
+                rec_dt = row.get('Parsed_DateTime')
+                if pd.isnull(rec_dt) or not isinstance(rec_dt, datetime): continue
+                rec_dt_aware = config.IST.localize(rec_dt)
+                rake_no = str(row.get('RAKE No'))
+                remarks = str(row.get('REMARKS', ''))
+
+                if rec_dt_aware < cutoff_date:
+                    # PRE-APR 2026 RULES: Pull from missing scanner OR existing remarks
+                    if rake_no in missing_bunching_map:
+                        hrs, mins = missing_bunching_map[rake_no]
+                        total_bunching_minutes += (hrs * 60) + mins
+                        bunching_data.append({
+                            "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
+                            "Data Source": "System Calculated (Missed)", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": "Automatically calculated from history."
+                        })
+                    elif "BUNCHING" in remarks.upper():
+                        match = re.search(r"BUNCHING.*?(\d{1,2}):(\d{2})", remarks, re.IGNORECASE)
+                        if match:
+                            hrs, mins = int(match.group(1)), int(match.group(2))
+                            total_bunching_minutes += (hrs * 60) + mins
+                            bunching_data.append({
+                                "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
+                                "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')
+                            })
+                else:
+                    # POST-APR 2026 RULES: Strictly read Google Sheet remarks ONLY
+                    if "BUNCHING" in remarks.upper():
+                        match = re.search(r"BUNCHING.*?(\d{1,2}):(\d{2})", remarks, re.IGNORECASE)
+                        if match:
+                            hrs, mins = int(match.group(1)), int(match.group(2))
+                            total_bunching_minutes += (hrs * 60) + mins
+                            bunching_data.append({
+                                "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
+                                "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')
+                            })
+
+            if not bunching_data:
+                st.success("✅ Zero bunching recorded during this period!")
+            else:
+                total_hrs = total_bunching_minutes // 60
+                total_mins = total_bunching_minutes % 60
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                m1, m2 = st.columns(2)
+                with m1:
+                    st.metric("🚂 Total Rakes Affected", len(bunching_data))
+                with m2:
+                    st.metric("⏱️ Total Bunching Time", f"{total_hrs:02d} hrs {total_mins:02d} mins")
+
+                st.write("**Detailed Breakdown:**")
+                b_df = pd.DataFrame(bunching_data)
+                st.dataframe(b_df, use_container_width=True, hide_index=True)
+
+    st.markdown("<hr style='margin:1em 0;'>", unsafe_allow_html=True)
+    st.markdown("### 🩺 Database Diagnostics (X-Ray Tool)")
+    st.info("Use this to verify if the newest Google Sheets tab is actually reaching the app.")
+    if st.button("🔍 Run Database X-Ray", type="secondary"):
+        if df_all.empty: st.error("🚨 Database is completely empty or URL is broken.")
+        else:
+            st.success("✅ Database connection active.")
+            st.write("📁 **Tabs Successfully Read:**")
+            if 'Loaded_From_Tab' in df_all.columns: st.write(df_all['Loaded_From_Tab'].unique().tolist())
+            st.write("🏷️ **Detected Columns (Check for missing or weird names):**")
+            st.write(df_all.columns.tolist())
+            st.write("📄 **Newest 10 Raw Entries in Memory:**")
+            st.dataframe(df_all.head(10), use_container_width=True)
