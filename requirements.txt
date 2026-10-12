@@ -1,0 +1,7 @@
+streamlit
+pandas
+pytz
+requests
+openpyxl
+plotly
+bcrypt
