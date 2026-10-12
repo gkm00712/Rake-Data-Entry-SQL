@@ -3,12 +3,12 @@ import pandas as pd
 from datetime import datetime, timedelta
 import re
 import math
-import requests
 import config
 import utils
-from data_manager import get_next_rake_details, save_long_outages, get_all_excel_data, lookup_gcv_vm
+from data_manager import get_next_rake_details, save_long_outages, get_all_excel_data, lookup_gcv_vm, save_rake_to_db
 
 def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data_current):
+    # --- 96-HOUR (4-DAY) WINDOW FOR OPERATORS ---
     if not is_super_admin:
         min_date_allowed = today_ist - timedelta(days=4)
 
@@ -31,6 +31,7 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             rec_dt = row.get('Parsed_DateTime')
             if pd.notnull(rec_dt) and isinstance(rec_dt, datetime):
                 rec_dt_aware = config.IST.localize(rec_dt)
+                # 96 HOUR LIMIT FOR PARTIAL RAKES
                 if (now_ist - rec_dt_aware).total_seconds() > 96 * 3600:
                     blocked_rakes.append(rake_val)
 
@@ -676,31 +677,28 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                     "wt1": tippler_data["WT-1"], "wt2": tippler_data["WT-2"], "wt3": tippler_data["WT-3"], "wt4": tippler_data["WT-4"], "gcv": str(safe_int(gcv_val)) if gcv_val else "", "vm": safe_num(vm_val)
                 }
                 
-                with st.spinner(f"Saving to {month_tab_name}..."):
+                # --- NEW: POSTGRESQL DATABASE SAVE ---
+                with st.spinner(f"Saving to secure database..."):
                     try:
-                        res = requests.post(config.APPS_SCRIPT_URL, json=payload, timeout=20)
-                        if res.status_code == 200:
-                            st.success(f"✅ Rake {rake_no} saved!")
-                            if is_finalizing: save_long_outages(remaining_lo_to_save)
-                            if entry_mode == "➕ New Entry":
-                                st.session_state.pending_new_sr = sr_no + 1
-                                try:
-                                    prev_a, prev_b = map(int, rake_no.split('/'))
-                                    len_a, len_b = len(rake_no.split('/')[0]), len(rake_no.split('/')[1])
-                                    st.session_state.pending_new_rake = f"{prev_a+1:0{len_a}d}/{prev_b+1:0{len_b}d}"
-                                except: pass
-                            
-                            st.session_state.outages_list.clear()
-                            get_all_excel_data.clear()
-                            st.session_state.form_key += 1
-                            st.session_state.outage_key = 0
-                            st.session_state.current_mode = "➕ New Entry" 
-                            st.rerun()
-                            
-                    except requests.exceptions.Timeout:
-                        st.error("⏳ The server took too long to respond. Please check your connection and try clicking Submit again.")
+                        save_rake_to_db(payload)
+                        st.success(f"✅ Rake {rake_no} saved securely to PostgreSQL!")
+                        
+                        if is_finalizing: save_long_outages(remaining_lo_to_save)
+                        if entry_mode == "➕ New Entry":
+                            st.session_state.pending_new_sr = sr_no + 1
+                            try:
+                                prev_a, prev_b = map(int, rake_no.split('/'))
+                                len_a, len_b = len(rake_no.split('/')[0]), len(rake_no.split('/')[1])
+                                st.session_state.pending_new_rake = f"{prev_a+1:0{len_a}d}/{prev_b+1:0{len_b}d}"
+                            except: pass
+                        
+                        st.session_state.outages_list.clear()
+                        st.session_state.form_key += 1
+                        st.session_state.outage_key = 0
+                        st.session_state.current_mode = "➕ New Entry" 
+                        st.rerun()
                     except Exception as e: 
-                        st.error(f"Connection failed: {e}")
+                        st.error(f"Database connection failed: {e}")
 
         st.markdown("""
             <div style="text-align: center; margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
