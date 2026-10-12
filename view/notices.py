@@ -1,6 +1,4 @@
 import streamlit as st
-import time
-from datetime import datetime, timedelta
 import config
 from data_manager import save_whiteboard, save_long_outages
 
@@ -28,22 +26,33 @@ def render_header(now_ist):
             st.rerun()
 
 def render_whiteboard(wb_data):
-    with st.expander("📋 Control Room Whiteboard", expanded=bool(wb_data)):
-        if not wb_data: st.info("No active notices.")
-        else:
-            for idx, msg in enumerate(wb_data):
-                col_msg, col_del = st.columns([8, 1], gap="small")
-                with col_msg: st.markdown(f"🗓️ **[{datetime.fromtimestamp(msg['time'], config.IST).strftime('%d-%b %H:%M')}]** ➔ {msg['text']}")
-                with col_del:
-                    if st.button("❌", key=f"del_wb_{idx}", use_container_width=True): 
-                        wb_data.pop(idx); save_whiteboard(wb_data); st.rerun()
+    # wb_data is now a dictionary containing single message info from Supabase
+    msg_text = wb_data.get("message", "Welcome to CHP-O Data Entry.")
+    updated_by = wb_data.get("updated_by", "System")
+    updated_at = wb_data.get("updated_at", "")
 
+    with st.container(border=True):
+        col_lbl, col_msg = st.columns([1, 5], gap="small")
+        with col_lbl:
+            st.markdown("📢 **WHITEBOARD**")
+        with col_msg:
+            st.markdown(f"🗓️ **[{updated_at}]** ➔ {msg_text} *(Updated by: {updated_by})*")
+
+    with st.expander("📋 Control Room Whiteboard Management", expanded=False):
         with st.form("wb_form", clear_on_submit=True):
             col_inp, col_btn = st.columns([5, 1], gap="small")
-            with col_inp: new_msg = st.text_input("Post notice...", placeholder="E.g., WT-2 is under maintenance until 14:00", label_visibility="collapsed")
+            with col_inp: 
+                new_msg = st.text_input("Update notice...", placeholder="E.g., WT-2 is under maintenance until 14:00", label_visibility="collapsed")
             with col_btn:
                 if st.form_submit_button("📌 Post", use_container_width=True) and new_msg.strip():
-                    wb_data.append({"text": new_msg.strip(), "time": time.time()}); save_whiteboard(wb_data); st.rerun()
+                    current_time_str = datetime.now(config.IST).strftime('%d-%m-%Y %H:%M')
+                    updated_data = {
+                        "message": new_msg.strip(),
+                        "updated_by": st.session_state.get('username', 'Operator'),
+                        "updated_at": current_time_str
+                    }
+                    save_whiteboard(updated_data)
+                    st.rerun()
 
 def render_long_outages(lo_data, today_ist, is_super_admin):
     with st.expander("🚨 Active Equipment Long Outages", expanded=bool(lo_data)):
