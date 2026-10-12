@@ -5,5 +5,5 @@ requests
 openpyxl
 plotly
 bcrypt
-SQLAlchemy==2.0.29
+SQLAlchemy
 psycopg2-binary
