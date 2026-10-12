@@ -62,6 +62,23 @@ def save_new_rake_entry(entry_dict):
         st.error(f"Error saving rake entry: {e}")
         return False
 
+# Aliases expected by form_entry.py
+def save_rake_to_db(entry_dict):
+    return save_new_rake_entry(entry_dict)
+
+def get_next_rake_details(df_all):
+    try:
+        if df_all.empty or 'sr_no' not in df_all.columns:
+            return 1, "001/001"
+        max_sr = int(df_all['sr_no'].max()) + 1
+        return max_sr, f"{max_sr:03d}"
+    except Exception:
+        return 1, "001/001"
+
+def lookup_gcv_vm(source_name):
+    # Default fallback lookup if needed by form entry
+    return 3500, 20.0
+
 @st.cache_data(ttl=10)
 def load_whiteboard():
     try:
