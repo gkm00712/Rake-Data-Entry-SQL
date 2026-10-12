@@ -10,6 +10,38 @@ import re
 
 cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
 
+# --- HISTORICAL DATA MIGRATION TOOL ---
+def render_migration_tool():
+    st.markdown("---")
+    st.subheader("📥 Migrate Historical Google Sheet to Supabase")
+    st.info("Upload your exported Excel file (.xlsx) here to bulk-insert historical records into your Supabase database.")
+    
+    uploaded_file = st.file_uploader("Upload your exported Excel file (.xlsx)", type=["xlsx"], key="mig_file")
+    
+    if uploaded_file and st.button("🚀 Push Historical Data to Supabase", type="primary"):
+        try:
+            df_mig = pd.read_excel(uploaded_file)
+            
+            # Map old Google Sheet columns to Supabase database columns
+            rename_map = {
+                'Sr. No.': 'sr_no', 'RAKE No': 'rake_no', 'Coal siding/ Company': 'source', 
+                'BOXN / BOBR': 'wagon_spec', 'U/L Duration': 'u_duration', 'Cycle Time': 'r_duration',
+                'Demurrage': 'demurrage', 'REMARKS': 'remarks', 'NTH': 'nth', 'MUTH': 'muth',
+                'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 'GCV': 'gcv', 'VM': 'vm'
+            }
+            df_mig = df_mig.rename(columns=rename_map)
+            
+            # Use Streamlit's built-in Supabase connection engine
+            conn = st.connection("supabase", type="sql")
+            
+            with conn.engine.begin() as connection:
+                df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
+                
+            st.success("✅ Migration completed successfully! All historical rows are now in Supabase.")
+            get_all_excel_data.clear() # Clear cache so new data shows up immediately
+        except Exception as e:
+            st.error(f"❌ Error during migration: {e}")
+
 def render_yearly_tab(df_all, today_ist):
     st.info("💡 Yearly reports are based on the Financial Year (April 1st to March 31st).")
     current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
@@ -95,7 +127,6 @@ def render_bunching_report(df_all, today_ist):
     st.markdown("### ⏱️ Master Bunching Summary Report")
     st.info("Dynamically calculates missing bunching for dates before Apr 1, 2026. Strictly reads official Google Sheet remarks for dates on or after Apr 1, 2026.")
 
-    # --- DATE FILTERS ---
     report_type = st.radio("Select Timeframe:", ["Daily", "Monthly", "Financial Year", "Custom Range"], horizontal=True, key="br_type")
 
     cm1, cm2 = st.columns(2, gap="small")
@@ -117,7 +148,6 @@ def render_bunching_report(df_all, today_ist):
                 st.error("No valid data available.")
                 return
 
-            # Safely create a Date-only column for flawless filtering
             df_all['Just_Date'] = df_all['Parsed_DateTime'].apply(lambda x: x.date() if pd.notnull(x) else None)
 
             if report_type == "Daily":
@@ -139,8 +169,6 @@ def render_bunching_report(df_all, today_ist):
                 st.warning("No rakes found for the selected period.")
                 return
 
-            # --- STEP 1: SCAN ENTIRE HISTORY FOR MISSED PRE-APRIL 2026 BUNCHING ---
-            # FIX: Added str(x) to prevent TypeError on blank cells!
             df_boxn = df_all[df_all['(BOXN / BOBR)'].astype(str).str.upper().apply(lambda x: 'N' in str(x) and 'R' not in str(x))].copy()
             df_boxn = df_boxn.dropna(subset=['Parsed_DateTime']).sort_values(by='Parsed_DateTime', ascending=True)
 
@@ -156,11 +184,9 @@ def render_bunching_report(df_all, today_ist):
                         if b_sec > 0:
                             b_hrs, b_mins = int(b_sec // 3600), int((b_sec % 3600) // 60)
                             current_remarks = str(rake_3.get('REMARKS', ''))
-                            # If it's legitimately missing from the remarks, map it!
                             if "BUNCHING" not in current_remarks.upper():
                                 missing_bunching_map[rake_3['RAKE No']] = (b_hrs, b_mins)
 
-            # --- STEP 2: COMPILE THE FINAL FILTERED REPORT ---
             bunching_data = []
             total_bunching_minutes = 0
             cutoff_date = config.IST.localize(datetime(2026, 4, 1, 0, 0))
@@ -173,7 +199,6 @@ def render_bunching_report(df_all, today_ist):
                 remarks = str(row.get('REMARKS', ''))
 
                 if rec_dt_aware < cutoff_date:
-                    # PRE-APR 2026 RULES: Pull from missing scanner OR existing remarks
                     if rake_no in missing_bunching_map:
                         hrs, mins = missing_bunching_map[rake_no]
                         total_bunching_minutes += (hrs * 60) + mins
@@ -191,7 +216,6 @@ def render_bunching_report(df_all, today_ist):
                                 "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')
                             })
                 else:
-                    # POST-APR 2026 RULES: Strictly read Google Sheet remarks ONLY
                     if "BUNCHING" in remarks.upper():
                         match = re.search(r"BUNCHING.*?(\d{1,2}):(\d{2})", remarks, re.IGNORECASE)
                         if match:
@@ -221,14 +245,15 @@ def render_bunching_report(df_all, today_ist):
 
     st.markdown("<hr style='margin:1em 0;'>", unsafe_allow_html=True)
     st.markdown("### 🩺 Database Diagnostics (X-Ray Tool)")
-    st.info("Use this to verify if the newest Google Sheets tab is actually reaching the app.")
+    st.info("Use this to verify if data is successfully reaching the app.")
     if st.button("🔍 Run Database X-Ray", type="secondary"):
-        if df_all.empty: st.error("🚨 Database is completely empty or URL is broken.")
+        if df_all.empty: st.error("🚨 Database is completely empty.")
         else:
             st.success("✅ Database connection active.")
-            st.write("📁 **Tabs Successfully Read:**")
-            if 'Loaded_From_Tab' in df_all.columns: st.write(df_all['Loaded_From_Tab'].unique().tolist())
-            st.write("🏷️ **Detected Columns (Check for missing or weird names):**")
+            st.write("🏷️ **Detected Columns:**")
             st.write(df_all.columns.tolist())
-            st.write("📄 **Newest 10 Raw Entries in Memory:**")
+            st.write("📄 **Newest 10 Entries in Memory:**")
             st.dataframe(df_all.head(10), use_container_width=True)
+
+    # Render the migration tool at the bottom of the admin tools page
+    render_migration_tool()
