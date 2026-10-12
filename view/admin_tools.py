@@ -31,10 +31,13 @@ def render_migration_tool():
             }
             df_mig = df_mig.rename(columns=rename_map)
             
-            # Use Streamlit's built-in Supabase connection engine
-            conn = st.connection("supabase", type="sql")
+            # Use raw SQLAlchemy engine with psycopg2 directly from secrets
+            from sqlalchemy import create_engine
+            db_secrets = st.secrets["connections"]["supabase"]
+            db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
             
-            with conn.engine.begin() as connection:
+            engine = create_engine(db_url)
+            with engine.begin() as connection:
                 df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
                 
             st.success("✅ Migration completed successfully! All historical rows are now in Supabase.")
