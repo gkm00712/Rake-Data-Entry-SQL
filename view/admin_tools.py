@@ -4,11 +4,10 @@ from datetime import datetime, timedelta
 import requests
 import config
 import utils
-from data_manager import get_all_excel_data
+from data_manager import get_all_excel_data, get_db
 import plotly.express as px
 import re  
 
-# Ensure 'Demurrage (in Rs)' is NOT in cols_to_drop
 cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab', 'id']
 
 def render_migration_tool():
@@ -97,7 +96,6 @@ def render_yearly_tab(df_all, today_ist):
                 
                 if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
                 else:
-                    # FORCING ASCENDING ORDER (OLDEST FIRST) FOR REPORTS
                     filtered_df = filtered_df.sort_values(by='Parsed_DateTime', ascending=True)
                         
                     display_df = filtered_df.drop(columns=[c for c in cols_to_drop if c in filtered_df.columns], errors='ignore')
@@ -245,5 +243,41 @@ def render_bunching_report(df_all, today_ist):
                 with m1: st.metric("🚂 Total Rakes Affected", len(bunching_data))
                 with m2: st.metric("⏱️ Total Bunching Time", f"{total_hrs:02d} hrs {total_mins:02d} mins")
                 st.dataframe(pd.DataFrame(bunching_data), use_container_width=True, hide_index=True)
+
+    # --- DIRECT ADMIN DATABASE EDITOR & DELETER ---
+    st.markdown("---")
+    st.subheader("🛠️ Direct Admin Database Editor & Deleter")
+    st.info("Directly delete any historical record bypassing operator time windows.")
+    
+    if not df_all.empty:
+        search_rake = st.text_input("Search Rake No to Delete (e.g., 01/1500):", key="admin_search_rake")
+        if search_rake:
+            match_df = df_all[df_all['RAKE No'].astype(str).str.contains(search_rake.strip(), case=False, na=False)]
+            if match_df.empty:
+                st.warning(f"No rake found matching '{search_rake}'.")
+            else:
+                st.success(f"Found {len(match_df)} record(s).")
+                record_options = match_df.apply(lambda row: f"Sr. {row.get('Sr. No.')} | Rake {row.get('RAKE No')} | Date: {row.get('Receipt Date/Time')}", axis=1).tolist()
+                selected_option = st.selectbox("Select Record to Delete:", record_options, key="admin_select_record")
+                
+                selected_idx = record_options.index(selected_option)
+                selected_row = match_df.iloc[selected_idx]
+                
+                if st.button("🗑️ Delete This Record Permanently", type="primary"):
+                    try:
+                        engine = get_db()
+                        rake_to_delete = selected_row.get('RAKE No')
+                        sr_to_delete = selected_row.get('Sr. No.')
+                        
+                        with engine.begin() as conn:
+                            conn.exec_driver_sql(
+                                "DELETE FROM rakes_data WHERE rake_no = %s AND sr_no = %s;",
+                                (rake_to_delete, sr_to_delete)
+                            )
+                        st.success(f"✅ Successfully deleted Rake {rake_to_delete} (Sr. No. {sr_to_delete}) from Supabase!")
+                        get_all_excel_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Deletion failed: {e}")
 
     render_migration_tool()
