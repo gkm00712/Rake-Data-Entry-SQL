@@ -278,8 +278,8 @@ def render_bunching_report(df_all, today_ist):
                     if submitted_admin_edit:
                         try:
                             engine = get_db()
-                            rake_key = selected_row.get('RAKE No')
-                            sr_key = selected_row.get('Sr. No.')
+                            rake_key = str(selected_row.get('RAKE No'))
+                            sr_key = int(selected_row.get('Sr. No.'))
                             
                             with engine.begin() as conn:
                                 conn.exec_driver_sql(
@@ -288,7 +288,7 @@ def render_bunching_report(df_all, today_ist):
                                     SET source = %s, wagon_spec = %s, demurrage = %s, demurrage_in_rs = %s, remarks = %s, gcv = %s, vm = %s
                                     WHERE rake_no = %s AND sr_no = %s;
                                     """,
-                                    (new_source, new_wagon_spec, new_demurrage, new_demurrage_rs, new_remarks, new_gcv, new_vm, rake_key, sr_key)
+                                    (str(new_source), str(new_wagon_spec), float(new_demurrage), int(new_demurrage_rs), str(new_remarks), str(new_gcv), float(new_vm), rake_key, sr_key)
                                 )
                             st.success(f"✅ Successfully updated Rake {rake_key}!")
                             get_all_excel_data.clear()
@@ -299,8 +299,8 @@ def render_bunching_report(df_all, today_ist):
                 if st.button("🗑️ Delete This Record Permanently", type="primary"):
                     try:
                         engine = get_db()
-                        rake_to_delete = selected_row.get('RAKE No')
-                        sr_to_delete = selected_row.get('Sr. No.')
+                        rake_to_delete = str(selected_row.get('RAKE No'))
+                        sr_to_delete = int(selected_row.get('Sr. No.'))
                         
                         with engine.begin() as conn:
                             conn.exec_driver_sql(
