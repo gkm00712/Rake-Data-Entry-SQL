@@ -1,101 +1,87 @@
 import streamlit as st
-import time
-from datetime import datetime, timedelta
 import config
+from datetime import datetime
 from data_manager import save_whiteboard, save_long_outages
 
 def render_header(now_ist):
-    APP_UPDATE_RELEASE = config.IST.localize(datetime(2026, 4, 1, 7, 0)) 
-    show_update_alert = now_ist < APP_UPDATE_RELEASE + timedelta(hours=24)
-
-    if show_update_alert:
-        st.success("🚀 **APP UPDATE:** Resolved the Financial Year Rake ID collision issue!")
-
-    col_head, col_sync, col_log = st.columns([6, 1, 1], gap="small")
-    with col_head:
-        st.markdown("<h1>🚂 Rake Data Entry System</h1>", unsafe_allow_html=True)
-        st.caption(f"Logged in as: **{st.session_state.username}** | Role: **{st.session_state.role}**")
-    with col_sync:
-        st.write("")
-        if st.button("🔄 Sync Data", use_container_width=True): 
-            from data_manager import get_all_excel_data
-            get_all_excel_data.clear()
-            st.rerun()
-    with col_log:
-        st.write("")
-        if st.button("🚪 Logout", use_container_width=True):
-            for key in list(st.session_state.keys()): del st.session_state[key]
-            st.rerun()
+    st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 10px 20px; border-radius: 8px; border: 1px solid #e9ecef;">
+            <h3 style="margin: 0; color: #1f77b4; font-family: sans-serif;">🚂 NTPC Unchahar - CHP Rake Operations</h3>
+            <p style="margin: 0; font-weight: bold; color: #333;">📅 {now_ist.strftime('%d-%m-%Y %H:%M:%S')} IST</p>
+        </div>
+    """, unsafe_allow_html=True)
 
 def render_whiteboard(wb_data):
-    msg_text = wb_data.get("message", "Welcome to CHP-O Data Entry.")
-    updated_by = wb_data.get("updated_by", "System")
-    updated_at = wb_data.get("updated_at", "")
-
+    is_super_admin = (st.session_state.get('role') == "Super Admin")
+    
+    st.markdown("<br>", unsafe_allow_html=True)
     with st.container(border=True):
-        col_lbl, col_msg = st.columns([1, 5], gap="small")
-        with col_lbl:
-            st.markdown("📢 **WHITEBOARD**")
-        with col_msg:
-            st.markdown(f"🗓️ **[{updated_at}]** ➔ {msg_text} *(Updated by: {updated_by})*")
+        col_title, col_add = st.columns([4, 1])
+        with col_title:
+            st.markdown("##### 📋 Whiteboard / Shift Notes *(Auto-deletes after 24 hours)*")
+        with col_add:
+            with st.popover("➕ Add Note"):
+                with st.form("wb_add_form"):
+                    note_title = st.text_input("Title / Shift", value="Shift Note")
+                    note_content = st.text_area("Message")
+                    submitted = st.form_submit_button("Post Note")
+                    if submitted and note_content:
+                        now_ist = datetime.now(config.IST)
+                        wb_data.append({
+                            "title": note_title.strip(),
+                            "content": note_content.strip(),
+                            "timestamp": now_ist.isoformat()
+                        })
+                        save_whiteboard(wb_data)
+                        st.success("✅ Note posted!")
+                        st.rerun()
 
-    with st.expander("📋 Control Room Whiteboard Management", expanded=False):
-        with st.form("wb_form", clear_on_submit=True):
-            col_inp, col_btn = st.columns([5, 1], gap="small")
-            with col_inp: 
-                new_msg = st.text_input("Update notice...", placeholder="E.g., WT-2 is under maintenance until 14:00", label_visibility="collapsed")
-            with col_btn:
-                if st.form_submit_button("📌 Post", use_container_width=True) and new_msg.strip():
-                    current_time_str = datetime.now(config.IST).strftime('%d-%m-%Y %H:%M')
-                    updated_data = {
-                        "message": new_msg.strip(),
-                        "updated_by": st.session_state.get('username', 'Operator'),
-                        "updated_at": current_time_str
-                    }
-                    save_whiteboard(updated_data)
-                    st.rerun()
+        if not wb_data:
+            st.caption("No active shift notes.")
+            return
+            
+        for idx, note in enumerate(wb_data):
+            cols = st.columns([0.1, 8.5, 0.4] if is_super_admin else [0.1, 8.9])
+            with cols[0]:
+                st.markdown("📌")
+            with cols[1]:
+                st.markdown(f"**{note.get('title', 'Note')}**: {note.get('content', '')}")
+            
+            # --- ADMIN DELETE BUTTON FOR WHITEBOARD ---
+            if is_super_admin:
+                with cols[2]:
+                    if st.button("❌", key=f"del_wb_{idx}", help="Delete this whiteboard note"):
+                        wb_data.pop(idx)
+                        save_whiteboard(wb_data)
+                        st.success("✅ Note deleted!")
+                        st.rerun()
 
 def render_long_outages(lo_data, today_ist, is_super_admin):
-    with st.expander("🚨 Active Equipment Long Outages", expanded=bool(lo_data)):
-        for idx, lo in enumerate(lo_data):
-            dept_label = config.DEPT_COLORS.get(lo['dept'], lo['dept'])
-            affects_label = lo.get('affects', 'BOTH')
-            aff_text = "" if affects_label == "BOTH" else f" [Applies to {affects_label} Rakes]"
-            
-            if lo.get('status') == 'restored':
-                st.success(f"✅ **RESTORED:** {dept_label} **{lo['equip']}** (Waiting to punch into the next finalized {affects_label} rake)")
-                if is_super_admin and st.button("🗑️ Drop Restored", key=f"force_drop_rest_{idx}"):
-                    lo_data.pop(idx); save_long_outages(lo_data); st.rerun()
-            else:
-                st.error(f"🚨 {dept_label} **{lo['equip']}**{aff_text} ➔ Outage since: **{lo['since_date']} {lo['since_time']}**")
-                c_d, c_t, c_b1, c_b2 = st.columns([1.5, 1.5, 1.5, 1.5], gap="small")
-                with c_d: rest_date = st.date_input("Rest. Date", value=today_ist, key=f"rd_{idx}")
-                with c_t: rest_time = st.time_input("Rest. Time", value=None, step=60, key=f"rt_{idx}")
-                with c_b1:
-                    st.write("")
-                    if st.button("✅ Restore", key=f"rbtn_{idx}", use_container_width=True):
-                        if rest_time is None: st.error("❌ Time mandatory.")
-                        else:
-                            lo['status'] = 'restored'; lo['rest_date'] = rest_date.strftime('%d.%m.%Y'); lo['rest_time'] = rest_time.strftime('%H:%M')
-                            save_long_outages(lo_data); st.rerun()
-                with c_b2:
-                    if is_super_admin:
-                        st.write("")
-                        if st.button("🗑️ Drop", key=f"fdrop_{idx}", type="secondary", use_container_width=True):
-                            lo_data.pop(idx); save_long_outages(lo_data); st.rerun()
-            st.markdown("<hr style='margin:0.2em 0;'>", unsafe_allow_html=True)
+    if not lo_data: return
+    
+    active_los = [lo for lo in lo_data if lo.get('status') != 'restored']
+    if not active_los: return
 
-        with st.form("lo_form", clear_on_submit=True):
-            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 2.5, 1.2, 1.5, 1.5, 1.5], gap="small")
-            with c1: lo_dept = st.selectbox("Dept", ["MM", "EMD", "C&I", "OPR", "MGR", "CHEM", "OTHER"])
-            with c2: lo_equip = st.text_input("Equipment", placeholder="E.g., WT-1 CONVEYOR")
-            with c3: lo_affects = st.selectbox("Affects", ["BOTH", "N", "R"])
-            with c4: lo_date = st.date_input("Since Date", value=today_ist)
-            with c5: lo_time = st.time_input("Since Time", value=None, step=60)
-            with c6:
-                st.write("")
-                if st.form_submit_button("➕ Add Outage", use_container_width=True):
-                    if not lo_equip.strip() or lo_time is None: st.error("❌ Equip and Time mandatory.")
-                    else:
-                        lo_data.append({"dept": lo_dept, "equip": lo_equip.replace("|", "-").strip().upper(), "affects": lo_affects, "status": "active", "since_date": lo_date.strftime('%d.%m.%Y'), "since_time": lo_time.strftime('%H:%M')})
-                        save_long_outages(lo_data); st.rerun()
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown("##### 🚨 Active Equipment Long Outages")
+        
+        for idx, lo in enumerate(lo_data):
+            if lo.get('status') == 'restored': continue
+            
+            dept_lbl = config.DEPT_COLORS.get(lo.get('dept', ''), lo.get('dept', ''))
+            equip = lo.get('equip', '')
+            since = f"{lo.get('since_date', '')} {lo.get('since_time', '')}"
+            reason = lo.get('reason', '')
+            
+            cols = st.columns([8.5, 0.5] if is_super_admin else [9.0])
+            with cols[0]:
+                st.error(f"🔴 **{dept_lbl}** | **{equip}** (Outage Since: {since}) — Reason: *{reason}*")
+            
+            if is_super_admin:
+                with cols[1]:
+                    if st.button("❌", key=f"del_lo_{idx}", help="Delete this long outage"):
+                        lo_data.pop(idx)
+                        save_long_outages(lo_data)
+                        st.success("✅ Outage removed!")
+                        st.rerun()
