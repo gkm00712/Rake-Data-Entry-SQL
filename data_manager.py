@@ -9,11 +9,13 @@ import utils
 
 QUALITY_FILE = "quality_data.xlsx"
 
+# --- CONNECT TO SUPABASE ---
 def get_db():
     db_secrets = st.secrets["connections"]["supabase"]
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
+# --- FAST LOADING & CORRECT SQL DATE PARSING ---
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
     try:
@@ -49,7 +51,6 @@ def get_all_excel_data():
             if 'gcv' in df.columns: df['GCV'] = df['gcv']
             if 'vm' in df.columns: df['VM'] = df['vm']
             
-            # --- INDESTRUCTIBLE CHRONOLOGICAL SORTING ---
             def extract_absolute_rake(r_val):
                 try:
                     parts = str(r_val).split('/')
@@ -59,7 +60,6 @@ def get_all_excel_data():
                     
             if 'RAKE No' in df.columns:
                 df['Abs_Counter'] = df['RAKE No'].apply(extract_absolute_rake)
-                # Sort descending (newest on top) so the form always grabs the absolute latest rake correctly
                 df = df.sort_values(by=['Abs_Counter', 'Parsed_DateTime'], ascending=[False, False]).drop(columns=['Abs_Counter'])
             elif 'Parsed_DateTime' in df.columns:
                 df = df.sort_values(by='Parsed_DateTime', ascending=False)
@@ -162,27 +162,26 @@ def save_rake_to_db(entry_dict):
 def load_whiteboard():
     try:
         engine = get_db()
-        query = "SELECT message FROM whiteboard ORDER BY id DESC LIMIT 1"
+        query = "SELECT * FROM whiteboard ORDER BY id DESC LIMIT 1"
         df = pd.read_sql(query, con=engine)
-        if not df.empty and df.iloc[0]['message']:
-            val = df.iloc[0]['message']
-            try: return json.loads(val)
-            except: return [{"text": val, "time": time.time()}]
-        return []
-    except Exception: return []
+        if not df.empty:
+            return df.iloc[0].to_dict()
+        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
+    except Exception:
+        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
 
-def save_whiteboard(wb_list):
+def save_whiteboard(wb_dict):
     try:
         engine = get_db()
-        json_str = json.dumps(wb_list)
         with engine.begin() as conn:
             conn.exec_driver_sql("TRUNCATE TABLE whiteboard;")
             conn.exec_driver_sql(
-                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, 'System', CURRENT_TIMESTAMP);",
-                (json_str,)
+                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, %s, %s);",
+                (wb_dict.get('message', ''), wb_dict.get('updated_by', 'System'), wb_dict.get('updated_at', ''))
             )
         load_whiteboard.clear()
-    except Exception as e: pass
+    except Exception as e:
+        st.error(f"Error saving whiteboard: {e}")
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_long_outages():
