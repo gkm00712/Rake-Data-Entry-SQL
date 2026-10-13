@@ -94,13 +94,13 @@ def validate_time_window(dt_val, label, demurrage_val, is_super_admin, now_ist, 
     if is_super_admin:
         return True, ""
     diff_hours = (now_ist - dt_val).total_seconds() / 3600.0
-    if diff_hours > 96:
-        return False, f"❌ {label} is older than 96 hours. Operators cannot log or edit data beyond 4 days."
+    # --- STRICT 72-HOUR RULE ---
+    if diff_hours > 72:
+        return False, f"❌ {label} is older than 72 hours. Operators cannot log or edit data beyond 3 days."
     if dt_val > now_ist:
         return False, f"❌ {label} cannot be in the future!"
     return True, ""
 
-# --- FORMATTED EXCEL EXPORT WITH COLUMN U (DEMURRAGE IN RS) ---
 def generate_formatted_excel(df):
     cols_to_keep = [
         'Sr. No.', 'RAKE No', 'Coal siding/ Company', '(BOXN / BOBR)', 
