@@ -247,10 +247,10 @@ def render_bunching_report(df_all, today_ist):
     # --- DIRECT ADMIN DATABASE EDITOR & DELETER ---
     st.markdown("---")
     st.subheader("🛠️ Direct Admin Database Editor & Deleter")
-    st.info("Directly delete any historical record bypassing operator time windows.")
+    st.info("Search, edit, or delete any historical record directly bypassing operator time windows.")
     
     if not df_all.empty:
-        search_rake = st.text_input("Search Rake No to Delete (e.g., 01/1500):", key="admin_search_rake")
+        search_rake = st.text_input("Search Rake No to Edit/Delete (e.g., 01/1500):", key="admin_search_rake")
         if search_rake:
             match_df = df_all[df_all['RAKE No'].astype(str).str.contains(search_rake.strip(), case=False, na=False)]
             if match_df.empty:
@@ -258,11 +258,44 @@ def render_bunching_report(df_all, today_ist):
             else:
                 st.success(f"Found {len(match_df)} record(s).")
                 record_options = match_df.apply(lambda row: f"Sr. {row.get('Sr. No.')} | Rake {row.get('RAKE No')} | Date: {row.get('Receipt Date/Time')}", axis=1).tolist()
-                selected_option = st.selectbox("Select Record to Delete:", record_options, key="admin_select_record")
+                selected_option = st.selectbox("Select Record to Modify:", record_options, key="admin_select_record")
                 
                 selected_idx = record_options.index(selected_option)
                 selected_row = match_df.iloc[selected_idx]
                 
+                with st.form("admin_edit_form"):
+                    st.markdown(f"#### Editing Rake: **{selected_row.get('RAKE No')}** (Sr. No: {selected_row.get('Sr. No.')})")
+                    
+                    new_source = st.text_input("Coal Siding / Company", value=str(selected_row.get('Coal siding/ Company', '')))
+                    new_wagon_spec = st.text_input("Wagon Spec (e.g. 58N)", value=str(selected_row.get('(BOXN / BOBR)', '')))
+                    new_demurrage = st.number_input("Demurrage (Hrs)", value=float(selected_row.get('Demurrage', 0) or 0), step=1.0)
+                    new_demurrage_rs = st.number_input("Demurrage (in Rs)", value=int(selected_row.get('Demurrage (in Rs)', 0) or 0), step=100)
+                    new_remarks = st.text_area("Remarks / Outages", value=str(selected_row.get('REMARKS', '')))
+                    new_gcv = st.text_input("GCV", value=str(selected_row.get('GCV', '')))
+                    new_vm = st.number_input("VM %", value=float(selected_row.get('VM', 0.0) or 0.0), step=0.01)
+
+                    submitted_admin_edit = st.form_submit_button("💾 Save Changes to Database", type="primary")
+                    if submitted_admin_edit:
+                        try:
+                            engine = get_db()
+                            rake_key = selected_row.get('RAKE No')
+                            sr_key = selected_row.get('Sr. No.')
+                            
+                            with engine.begin() as conn:
+                                conn.exec_driver_sql(
+                                    """
+                                    UPDATE rakes_data 
+                                    SET source = %s, wagon_spec = %s, demurrage = %s, demurrage_in_rs = %s, remarks = %s, gcv = %s, vm = %s
+                                    WHERE rake_no = %s AND sr_no = %s;
+                                    """,
+                                    (new_source, new_wagon_spec, new_demurrage, new_demurrage_rs, new_remarks, new_gcv, new_vm, rake_key, sr_key)
+                                )
+                            st.success(f"✅ Successfully updated Rake {rake_key}!")
+                            get_all_excel_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Update failed: {e}")
+
                 if st.button("🗑️ Delete This Record Permanently", type="primary"):
                     try:
                         engine = get_db()
@@ -274,7 +307,7 @@ def render_bunching_report(df_all, today_ist):
                                 "DELETE FROM rakes_data WHERE rake_no = %s AND sr_no = %s;",
                                 (rake_to_delete, sr_to_delete)
                             )
-                        st.success(f"✅ Successfully deleted Rake {rake_to_delete} (Sr. No. {sr_to_delete}) from Supabase!")
+                        st.success(f"✅ Successfully deleted Rake {rake_to_delete} from Supabase!")
                         get_all_excel_data.clear()
                         st.rerun()
                     except Exception as e:
