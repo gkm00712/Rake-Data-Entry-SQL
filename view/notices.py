@@ -1,6 +1,5 @@
 import streamlit as st
 import config
-import copy
 from datetime import datetime
 from data_manager import save_whiteboard, save_long_outages
 
@@ -31,7 +30,7 @@ def render_whiteboard(wb_data):
                         st.error("❌ Message cannot be empty!")
                     else:
                         now_ist = datetime.now(config.IST)
-                        updated_wb = copy.deepcopy(wb_data)
+                        updated_wb = list(wb_data)
                         updated_wb.append({
                             "title": note_title.strip(),
                             "content": note_content.strip(),
@@ -65,7 +64,7 @@ def render_whiteboard(wb_data):
             
             with cols[2]:
                 if st.button("❌", key=f"del_wb_{idx}", help="Delete this whiteboard note"):
-                    updated_wb = copy.deepcopy(wb_data)
+                    updated_wb = list(wb_data)
                     updated_wb.pop(idx)
                     save_whiteboard(updated_wb)
                     st.rerun()
@@ -101,8 +100,7 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                             "status": "ongoing"
                         }
                         
-                        # Safely modify data using deepcopy to bypass Streamlit cache lock
-                        updated_lo = copy.deepcopy(lo_data)
+                        updated_lo = list(lo_data)
                         updated_lo.append(new_lo)
                         
                         save_long_outages(updated_lo)
@@ -143,7 +141,7 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                     with c1:
                         if st.button("🔄", key=f"res_lo_{idx}", help="Mark as Restored"):
                             now_ist = datetime.now(config.IST)
-                            updated_lo = copy.deepcopy(lo_data)
+                            updated_lo = list(lo_data)
                             updated_lo[idx]['status'] = 'restored'
                             updated_lo[idx]['rest_date'] = now_ist.strftime('%d.%m')
                             updated_lo[idx]['rest_time'] = now_ist.strftime('%H:%M')
@@ -151,7 +149,7 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                             st.rerun()
                     with c2:
                         if st.button("❌", key=f"del_lo_{idx}", help="Delete permanently"):
-                            updated_lo = copy.deepcopy(lo_data)
+                            updated_lo = list(lo_data)
                             updated_lo.pop(idx)
                             save_long_outages(updated_lo)
                             st.rerun()
