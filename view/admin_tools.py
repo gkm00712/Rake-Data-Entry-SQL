@@ -10,70 +10,49 @@ import re
 
 cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
 
-# --- UPGRADED HISTORICAL DATA MIGRATION TOOL ---
 def render_migration_tool():
     st.markdown("---")
     st.subheader("📥 Migrate Historical Google Sheet to Supabase")
-    st.info("Upload your exported Excel file (.xlsx) here to bulk-insert historical records into your Supabase database.")
+    st.info("Upload your exported Excel file (.xlsx) here to bulk-insert historical records into your database.")
     
     uploaded_file = st.file_uploader("Upload your exported Excel file (.xlsx)", type=["xlsx"], key="mig_file")
-    clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Recommended to fix bad dates)")
+    clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Fixes corrupted dates)", value=True)
     
     if uploaded_file and st.button("🚀 Push Historical Data to Supabase", type="primary"):
-        try:
-            df_mig = pd.read_excel(uploaded_file)
-            
-            # Map old Google Sheet columns to Supabase database columns
-            rename_map = {
-                'Sr. No.': 'sr_no',
-                'RAKE No': 'rake_no',
-                'Coal siding/ Company': 'source',
-                '(BOXN / BOBR)': 'wagon_spec',
-                'Receipt Date/Time': 'receipt_dt',
-                'Placement Date/Time': 'placement_dt',
-                'U/L End Date/Time': 'ul_end_dt',
-                'Rake Rel. Date/Time': 'release_dt',
-                'Unloading Duration': 'u_duration',
-                'Rake Rel. Duration': 'r_duration',
-                'Cycle Time': 'r_duration',
-                'Demurrage (Hrs)': 'demurrage',
-                'REMARKS': 'remarks',
-                'NTH': 'nth',
-                'MUTH': 'muth',
-                'WT-1': 'wt1',
-                'WT-2': 'wt2',
-                'WT-3': 'wt3',
-                'WT-4': 'wt4',
-                'GCV': 'gcv',
-                'VM': 'vm'
-            }
-            df_mig = df_mig.rename(columns=rename_map)
-            
-            # Keep only columns that match our database schema
-            valid_columns = list(rename_map.values())
-            df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
-            
-            # FIX: Force strict Indian Date Parsing so Postgres doesn't flip Days and Months!
-            date_cols = ['receipt_dt', 'placement_dt', 'ul_end_dt', 'release_dt']
-            for col in date_cols:
-                if col in df_mig.columns:
-                    df_mig[col] = df_mig[col].apply(utils.safe_datetime_parse)
-            
-            # Use raw SQLAlchemy engine with psycopg2 directly from secrets
-            from sqlalchemy import create_engine
-            db_secrets = st.secrets["connections"]["supabase"]
-            db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
-            
-            engine = create_engine(db_url)
-            with engine.begin() as connection:
-                if clear_data:
-                    connection.exec_driver_sql("TRUNCATE TABLE rakes_data;")
-                df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
+        with st.spinner("Processing strictly formatted dates..."):
+            try:
+                df_mig = pd.read_excel(uploaded_file)
+                rename_map = {
+                    'Sr. No.': 'sr_no', 'RAKE No': 'rake_no', 'Coal siding/ Company': 'source', '(BOXN / BOBR)': 'wagon_spec',
+                    'Receipt Date/Time': 'receipt_dt', 'Placement Date/Time': 'placement_dt', 'U/L End Date/Time': 'ul_end_dt',
+                    'Rake Rel. Date/Time': 'release_dt', 'Unloading Duration': 'u_duration', 'Rake Rel. Duration': 'r_duration',
+                    'Cycle Time': 'r_duration', 'Demurrage (Hrs)': 'demurrage', 'REMARKS': 'remarks',
+                    'NTH': 'nth', 'MUTH': 'muth', 'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 'GCV': 'gcv', 'VM': 'vm'
+                }
+                df_mig = df_mig.rename(columns=rename_map)
                 
-            st.success("✅ Migration completed successfully! Dates are strictly mapped and data is in chronological order.")
-            get_all_excel_data.clear() # Clear cache so new data shows up immediately
-        except Exception as e:
-            st.error(f"❌ Error during migration: {e}")
+                valid_columns = list(rename_map.values())
+                df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
+                
+                # Force strict Indian Date Parsing so Postgres doesn't flip Days and Months!
+                date_cols = ['receipt_dt', 'placement_dt', 'ul_end_dt', 'release_dt']
+                for col in date_cols:
+                    if col in df_mig.columns:
+                        df_mig[col] = df_mig[col].apply(utils.safe_datetime_parse)
+                
+                from sqlalchemy import create_engine
+                db_secrets = st.secrets["connections"]["supabase"]
+                db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
+                
+                engine = create_engine(db_url)
+                with engine.begin() as connection:
+                    if clear_data:
+                        connection.exec_driver_sql("TRUNCATE TABLE rakes_data;")
+                    df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
+                    
+                st.success("✅ Migration completed successfully! Dates and Chronological sorting are permanently fixed.")
+                get_all_excel_data.clear() 
+            except Exception as e: st.error(f"❌ Error during migration: {e}")
 
 def render_yearly_tab(df_all, today_ist):
     st.info("💡 Yearly reports are based on the Financial Year (April 1st to March 31st).")
@@ -87,9 +66,16 @@ def render_yearly_tab(df_all, today_ist):
                 
                 if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
                 else:
-                    # Explicitly sort chronologically by Rake No/Sr No before displaying
-                    if 'sr_no' in filtered_df.columns:
-                        filtered_df = filtered_df.sort_values(by='sr_no', ascending=True)
+                    # Explicitly sort chronologically by Absolute Rake No (Ascending) before displaying
+                    if 'RAKE No' in filtered_df.columns:
+                        def get_abs(r):
+                            try:
+                                parts = str(r).split('/')
+                                if len(parts) > 1 and parts[-1].strip().isdigit(): return int(parts[-1].strip())
+                                return 0
+                            except: return 0
+                        filtered_df['abs_rake'] = filtered_df['RAKE No'].apply(get_abs)
+                        filtered_df = filtered_df.sort_values(by=['abs_rake', 'Parsed_DateTime'], ascending=[True, True]).drop(columns=['abs_rake'])
                         
                     display_df = filtered_df.drop(columns=[c for c in cols_to_drop if c in filtered_df.columns], errors='ignore')
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -100,7 +86,6 @@ def render_mine_wise(df_all, today_ist):
     st.info("View the total number of rakes received from each Coal Siding or by Parent Company.")
     
     report_type = st.radio("Report Type:", ["Monthly", "Yearly"], horizontal=True, key="mw_type")
-    
     group_by = st.radio("Group Data By:", ["Exact Siding Name (e.g., KDH / CCL)", "Parent Company Only (e.g., CCL)"], horizontal=True, key="mw_group")
     
     cm1, cm2 = st.columns(2, gap="small")
@@ -143,27 +128,17 @@ def render_mine_wise(df_all, today_ist):
                     summary_df = summary_df.rename(columns={'Target_Column': display_name})
                     
                     if not summary_df.empty:
-                        fig = px.pie(
-                            summary_df, 
-                            values='Total Rakes', 
-                            names=display_name, 
-                            title=f"Distribution of Rakes by {display_name} ({report_type})",
-                            hole=0.4
-                        )
+                        fig = px.pie(summary_df, values='Total Rakes', names=display_name, title=f"Distribution of Rakes by {display_name} ({report_type})", hole=0.4)
                         fig.update_traces(textposition='inside', textinfo='percent+label')
                         st.plotly_chart(fig, use_container_width=True)
 
                     total_rakes = summary_df['Total Rakes'].sum()
                     summary_df.loc[len(summary_df)] = ['TOTAL SUM', total_rakes]
                     st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                else:
-                    st.error("Column 'Coal siding/ Company' not found in data.")
 
 def render_bunching_report(df_all, today_ist):
     st.markdown("<hr style='margin:1em 0;'>", unsafe_allow_html=True)
     st.markdown("### ⏱️ Master Bunching Summary Report")
-    st.info("Dynamically calculates missing bunching for dates before Apr 1, 2026. Strictly reads official Google Sheet remarks for dates on or after Apr 1, 2026.")
-
     report_type = st.radio("Select Timeframe:", ["Daily", "Monthly", "Financial Year", "Custom Range"], horizontal=True, key="br_type")
 
     cm1, cm2 = st.columns(2, gap="small")
@@ -181,34 +156,18 @@ def render_bunching_report(df_all, today_ist):
 
     if st.button("📊 Calculate Total Bunching", type="primary"):
         with st.spinner("Extracting bunching data..."):
-            if df_all.empty or 'Parsed_DateTime' not in df_all.columns:
-                st.error("No valid data available.")
-                return
-
+            if df_all.empty or 'Parsed_DateTime' not in df_all.columns: return
             df_all['Just_Date'] = df_all['Parsed_DateTime'].apply(lambda x: x.date() if pd.notnull(x) else None)
 
-            if report_type == "Daily":
-                mask = df_all['Just_Date'] == target_date
-            elif report_type == "Monthly":
-                mask = df_all['Just_Date'].apply(lambda d: d.month == br_month and d.year == br_year if d else False)
-            elif report_type == "Financial Year":
-                mask = df_all['Just_Date'].apply(lambda d: (d.year if d.month >= 4 else d.year - 1) == br_fy if d else False)
+            if report_type == "Daily": mask = df_all['Just_Date'] == target_date
+            elif report_type == "Monthly": mask = df_all['Just_Date'].apply(lambda d: d.month == br_month and d.year == br_year if d else False)
+            elif report_type == "Financial Year": mask = df_all['Just_Date'].apply(lambda d: (d.year if d.month >= 4 else d.year - 1) == br_fy if d else False)
             elif report_type == "Custom Range":
-                if len(date_range) == 2:
-                    mask = (df_all['Just_Date'] >= date_range[0]) & (df_all['Just_Date'] <= date_range[1])
-                else:
-                    st.error("Please select a complete start and end date.")
-                    return
+                if len(date_range) == 2: mask = (df_all['Just_Date'] >= date_range[0]) & (df_all['Just_Date'] <= date_range[1])
+                else: return
 
             filtered_df = df_all[mask].copy()
-
-            if filtered_df.empty:
-                st.warning("No rakes found for the selected period.")
-                return
-            
-            # Ensure proper chronological sorting for bunching calculation
-            if 'sr_no' in filtered_df.columns:
-                filtered_df = filtered_df.sort_values(by='sr_no', ascending=True)
+            if filtered_df.empty: return
 
             df_boxn = df_all[df_all['(BOXN / BOBR)'].astype(str).str.upper().apply(lambda x: 'N' in str(x) and 'R' not in str(x))].copy()
             df_boxn = df_boxn.dropna(subset=['Parsed_DateTime']).sort_values(by='Parsed_DateTime', ascending=True)
@@ -219,14 +178,12 @@ def render_bunching_report(df_all, today_ist):
                 dt_1, dt_3 = rake_1.get('Parsed_DateTime'), rake_3.get('Parsed_DateTime')
                 if pd.notnull(dt_1) and pd.notnull(dt_3) and isinstance(dt_1, datetime) and isinstance(dt_3, datetime):
                     dt_1_aware, dt_3_aware = config.IST.localize(dt_1), config.IST.localize(dt_3)
-                    
                     if dt_3_aware > dt_1_aware and dt_3_aware <= (dt_1_aware + timedelta(hours=5)):
                         b_sec = (dt_1_aware + timedelta(hours=5) - dt_3_aware).total_seconds()
                         if b_sec > 0:
                             b_hrs, b_mins = int(b_sec // 3600), int((b_sec % 3600) // 60)
                             current_remarks = str(rake_3.get('REMARKS', ''))
-                            if "BUNCHING" not in current_remarks.upper():
-                                missing_bunching_map[rake_3['RAKE No']] = (b_hrs, b_mins)
+                            if "BUNCHING" not in current_remarks.upper(): missing_bunching_map[rake_3['RAKE No']] = (b_hrs, b_mins)
 
             bunching_data = []
             total_bunching_minutes = 0
@@ -236,65 +193,34 @@ def render_bunching_report(df_all, today_ist):
                 rec_dt = row.get('Parsed_DateTime')
                 if pd.isnull(rec_dt) or not isinstance(rec_dt, datetime): continue
                 rec_dt_aware = config.IST.localize(rec_dt)
-                rake_no = str(row.get('RAKE No'))
-                remarks = str(row.get('REMARKS', ''))
+                rake_no = str(row.get('RAKE No')); remarks = str(row.get('REMARKS', ''))
 
                 if rec_dt_aware < cutoff_date:
                     if rake_no in missing_bunching_map:
                         hrs, mins = missing_bunching_map[rake_no]
                         total_bunching_minutes += (hrs * 60) + mins
-                        bunching_data.append({
-                            "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
-                            "Data Source": "System Calculated (Missed)", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": "Automatically calculated from history."
-                        })
+                        bunching_data.append({"Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'), "Data Source": "System Calculated (Missed)", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": "Automatically calculated."})
                     elif "BUNCHING" in remarks.upper():
                         match = re.search(r"BUNCHING.*?(\d{1,2}):(\d{2})", remarks, re.IGNORECASE)
                         if match:
                             hrs, mins = int(match.group(1)), int(match.group(2))
                             total_bunching_minutes += (hrs * 60) + mins
-                            bunching_data.append({
-                                "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
-                                "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')
-                            })
+                            bunching_data.append({"Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'), "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')})
                 else:
                     if "BUNCHING" in remarks.upper():
                         match = re.search(r"BUNCHING.*?(\d{1,2}):(\d{2})", remarks, re.IGNORECASE)
                         if match:
                             hrs, mins = int(match.group(1)), int(match.group(2))
                             total_bunching_minutes += (hrs * 60) + mins
-                            bunching_data.append({
-                                "Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'),
-                                "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')
-                            })
+                            bunching_data.append({"Rake No": rake_no, "Receipt Date": row.get('Receipt Date/Time'), "Data Source": "Google Sheet Remark", "Bunching Time": f"{hrs:02d}:{mins:02d} hrs", "Log Info": remarks.replace('\n', ' | ')})
 
-            if not bunching_data:
-                st.success("✅ Zero bunching recorded during this period!")
+            if not bunching_data: st.success("✅ Zero bunching recorded during this period!")
             else:
                 total_hrs = total_bunching_minutes // 60
                 total_mins = total_bunching_minutes % 60
-
-                st.markdown("<br>", unsafe_allow_html=True)
                 m1, m2 = st.columns(2)
-                with m1:
-                    st.metric("🚂 Total Rakes Affected", len(bunching_data))
-                with m2:
-                    st.metric("⏱️ Total Bunching Time", f"{total_hrs:02d} hrs {total_mins:02d} mins")
+                with m1: st.metric("🚂 Total Rakes Affected", len(bunching_data))
+                with m2: st.metric("⏱️ Total Bunching Time", f"{total_hrs:02d} hrs {total_mins:02d} mins")
+                st.dataframe(pd.DataFrame(bunching_data), use_container_width=True, hide_index=True)
 
-                st.write("**Detailed Breakdown:**")
-                b_df = pd.DataFrame(bunching_data)
-                st.dataframe(b_df, use_container_width=True, hide_index=True)
-
-    st.markdown("<hr style='margin:1em 0;'>", unsafe_allow_html=True)
-    st.markdown("### 🩺 Database Diagnostics (X-Ray Tool)")
-    st.info("Use this to verify if data is successfully reaching the app.")
-    if st.button("🔍 Run Database X-Ray", type="secondary"):
-        if df_all.empty: st.error("🚨 Database is completely empty.")
-        else:
-            st.success("✅ Database connection active.")
-            st.write("🏷️ **Detected Columns:**")
-            st.write(df_all.columns.tolist())
-            st.write("📄 **Newest 10 Entries in Memory:**")
-            st.dataframe(df_all.head(10), use_container_width=True)
-
-    # Render the migration tool at the bottom of the admin tools page
     render_migration_tool()
