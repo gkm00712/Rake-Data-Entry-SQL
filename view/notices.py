@@ -6,7 +6,7 @@ from data_manager import save_whiteboard, save_long_outages
 def render_header(now_ist):
     st.markdown(f"""
         <div style="display: flex; justify-content: space-between; align-items: center; background-color: #f8f9fa; padding: 10px 20px; border-radius: 8px; border: 1px solid #e9ecef;">
-            <h3 style="margin: 0; color: #1f77b4; font-family: sans-serif;">🚂 NTPC Unchahar - CHP Rake Operations</h3>
+            <h3 style="margin: 0; color: #1f77b4; font-family: sans-serif;">🚂 CHP Operation Rake Data Entry System</h3>
             <p style="margin: 0; font-weight: bold; color: #333;">📅 {now_ist.strftime('%d-%m-%Y %H:%M:%S')} IST</p>
         </div>
     """, unsafe_allow_html=True)
