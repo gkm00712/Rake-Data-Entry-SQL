@@ -56,15 +56,12 @@ def parse_outages(remarks_str):
     for line in lines:
         line = line.strip()
         if not line or line.startswith('[PARTIAL]'): continue
-        
-        # Skip auto-generated system remarks so they don't appear in the Outage Editor
         if "BUNCHING" in line.upper() or "NTPC OWNED" in line.upper() or "RAKE WAITING" in line.upper(): 
             continue
         
         parts = line.split('|')
         if len(parts) >= 2:
             dept_raw = parts[0].strip().replace('⚪ ', '').replace('🔴 ', '').replace('🟢 ', '').replace('🔵 ', '').replace('🟠 ', '').replace('🟣 ', '').replace('🟡 ', '')
-            
             dept = dept_raw
             for k, v in config.DEPT_COLORS.items():
                 if dept_raw in v:
@@ -85,58 +82,43 @@ def parse_outages(remarks_str):
 
 def resolve_tippler_time(time_obj, base_dt, end_dt):
     if not time_obj or not base_dt or not end_dt: return None
-    
     dt_candidate = config.IST.localize(datetime.combine(base_dt.date(), time_obj))
     if base_dt <= dt_candidate <= end_dt: return dt_candidate
-    
     dt_candidate_next = config.IST.localize(datetime.combine(base_dt.date() + timedelta(days=1), time_obj))
     if base_dt <= dt_candidate_next <= end_dt: return dt_candidate_next
-    
     dt_candidate_prev = config.IST.localize(datetime.combine(base_dt.date() - timedelta(days=1), time_obj))
     if base_dt <= dt_candidate_prev <= end_dt: return dt_candidate_prev
-    
     return None
 
 def validate_time_window(dt_val, label, demurrage_val, is_super_admin, now_ist, entry_mode, w_type, is_ntpc_owned):
     if is_super_admin:
         return True, ""
-        
     diff_hours = (now_ist - dt_val).total_seconds() / 3600.0
-    
     if diff_hours > 96:
         return False, f"❌ {label} is older than 96 hours. Operators cannot log or edit data beyond 4 days."
-        
     if dt_val > now_ist:
         return False, f"❌ {label} cannot be in the future!"
-        
     return True, ""
 
-# --- BUG FIX: BULLETPROOF EXCEL FORMATTING ---
+# --- FORMATTED EXCEL EXPORT WITH COLUMN U (DEMURRAGE IN RS) ---
 def generate_formatted_excel(df):
-    # Strictly define the clean columns you actually want in your Excel report
     cols_to_keep = [
         'Sr. No.', 'RAKE No', 'Coal siding/ Company', '(BOXN / BOBR)', 
         'Receipt Date/Time', 'Placement Date/Time', 'U/L End Date/Time', 
         'Rake Rel. Date/Time', 'Unloading Duration', 'Cycle Time', 'Demurrage', 
-        'REMARKS', 'NTH', 'MUTH', 'WT-1', 'WT-2', 'WT-3', 'WT-4', 'GCV', 'VM'
+        'REMARKS', 'NTH', 'MUTH', 'WT-1', 'WT-2', 'WT-3', 'WT-4', 'GCV', 'VM', 'Demurrage (in Rs)'
     ]
                     
-    # Filter out raw SQL columns so only official columns print
     clean_df = df[[c for c in cols_to_keep if c in df.columns]]
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         clean_df.to_excel(writer, index=False, sheet_name='Report')
         
-        # Auto-adjust column widths safely
         worksheet = writer.sheets['Report']
         for idx, col in enumerate(clean_df.columns):
             col_header_len = len(str(col))
-            if len(clean_df) > 0:
-                max_val_len = max([len(str(val)) for val in clean_df[col].astype(str).values])
-            else:
-                max_val_len = 0
-                
+            max_val_len = max([len(str(val)) for val in clean_df[col].astype(str).values]) if len(clean_df) > 0 else 0
             max_len = max(col_header_len, max_val_len) + 2
             col_letter = get_column_letter(idx + 1)
             worksheet.column_dimensions[col_letter].width = min(max_len, 50)
