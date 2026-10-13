@@ -192,11 +192,10 @@ def save_rake_to_db(entry_dict):
 def load_whiteboard():
     try:
         engine = get_db()
-        # Removed ORDER BY id to prevent silent crashes
-        query = "SELECT message FROM whiteboard"
+        query = "SELECT message FROM whiteboard ORDER BY id DESC LIMIT 1"
         df = pd.read_sql(query, con=engine)
-        if not df.empty:
-            val = df.iloc[-1]['message'] # Get the latest row safely
+        if not df.empty and df.iloc[0]['message']:
+            val = df.iloc[0]['message']
             try:
                 notes = json.loads(val)
                 if isinstance(notes, list):
@@ -214,8 +213,10 @@ def load_whiteboard():
                             except:
                                 valid_notes.append(note)
                     return valid_notes
-            except: pass
-    except Exception: pass
+            except:
+                pass
+    except Exception:
+        pass
     return []
 
 def save_whiteboard(wb_data):
@@ -241,28 +242,35 @@ def save_whiteboard(wb_data):
 def load_long_outages():
     try:
         engine = get_db()
-        # Removed ORDER BY id dependency
-        query = "SELECT data FROM long_outages"
+        # Fetch all rows directly from the table
+        query = "SELECT * FROM long_outages ORDER BY id ASC"
         df = pd.read_sql(query, con=engine)
+        
         if not df.empty:
-            val = df.iloc[-1]['data'] # Pull from the most recent row
-            if val:
-                return json.loads(val) if isinstance(val, str) else val
+            # Return as a list of dictionaries matching the columns in Supabase
+            return df.to_dict('records')
         return []
     except Exception as e: 
-        st.error(f"Load Error (Long Outages): {e}") # If it fails, print exactly why!
+        st.error(f"Load Error (Long Outages): {e}") 
         return []
 
 def save_long_outages(lo_list):
     try:
         engine = get_db()
-        json_str = json.dumps(lo_list)
+        
         with engine.begin() as conn:
-            conn.exec_driver_sql("TRUNCATE TABLE long_outages;")
-            conn.exec_driver_sql(
-                "INSERT INTO long_outages (data) VALUES (%s);",
-                (json_str,)
-            )
+            # Clear old active outages
+            conn.exec_driver_sql("TRUNCATE TABLE long_outages RESTART IDENTITY;")
+            
+            # Save the new state matching the exact column names
+            if lo_list:
+                df = pd.DataFrame(lo_list)
+                
+                if 'id' in df.columns:
+                    df = df.drop(columns=['id'])
+                    
+                df.to_sql('long_outages', con=conn, if_exists='append', index=False)
+                
         load_long_outages.clear()
     except Exception as e:
         st.error(f"❌ Database Save Error: {e}")
