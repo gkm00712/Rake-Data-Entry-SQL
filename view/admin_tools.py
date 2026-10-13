@@ -8,6 +8,7 @@ from data_manager import get_all_excel_data
 import plotly.express as px
 import re  
 
+# Ensure 'Demurrage (in Rs)' is NOT in cols_to_drop
 cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab', 'id']
 
 def render_migration_tool():
@@ -96,15 +97,8 @@ def render_yearly_tab(df_all, today_ist):
                 
                 if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
                 else:
-                    if 'RAKE No' in filtered_df.columns:
-                        def get_abs(r):
-                            try:
-                                parts = str(r).split('/')
-                                if len(parts) > 1 and parts[-1].strip().isdigit(): return int(parts[-1].strip())
-                                return 0
-                            except: return 0
-                        filtered_df['abs_rake'] = filtered_df['RAKE No'].apply(get_abs)
-                        filtered_df = filtered_df.sort_values(by=['abs_rake', 'Parsed_DateTime'], ascending=[True, True]).drop(columns=['abs_rake'])
+                    # FORCING ASCENDING ORDER (OLDEST FIRST) FOR REPORTS
+                    filtered_df = filtered_df.sort_values(by='Parsed_DateTime', ascending=True)
                         
                     display_df = filtered_df.drop(columns=[c for c in cols_to_drop if c in filtered_df.columns], errors='ignore')
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
