@@ -60,9 +60,10 @@ def get_all_excel_data():
                     
             if 'RAKE No' in df.columns:
                 df['Abs_Counter'] = df['RAKE No'].apply(extract_absolute_rake)
-                df = df.sort_values(by=['Abs_Counter', 'Parsed_DateTime'], ascending=[False, False]).drop(columns=['Abs_Counter'])
+                # Sort ascending (oldest/first rake on top to latest at bottom)
+                df = df.sort_values(by=['Abs_Counter', 'Parsed_DateTime'], ascending=[True, True]).drop(columns=['Abs_Counter'])
             elif 'Parsed_DateTime' in df.columns:
-                df = df.sort_values(by='Parsed_DateTime', ascending=False)
+                df = df.sort_values(by='Parsed_DateTime', ascending=True)
             
         return df
     except Exception as e:
@@ -78,7 +79,7 @@ def get_next_rake_details(df_all, today_ist):
         
         if df_clean.empty: return 1, "001/001"
             
-        last_row = df_clean.iloc[0] 
+        last_row = df_clean.iloc[-1]  # Bottom-most is latest due to ascending sort
         
         try: calc_sr = int(float(last_row.get('Sr. No.', 0))) + 1
         except: calc_sr = 1
