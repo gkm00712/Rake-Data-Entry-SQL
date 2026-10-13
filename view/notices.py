@@ -102,7 +102,6 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                         
                         updated_lo = list(lo_data)
                         updated_lo.append(new_lo)
-                        
                         save_long_outages(updated_lo)
                         st.rerun()
 
