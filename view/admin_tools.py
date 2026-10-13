@@ -8,7 +8,7 @@ from data_manager import get_all_excel_data
 import plotly.express as px
 import re  
 
-cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
+cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab', 'id']
 
 def render_migration_tool():
     st.markdown("---")
@@ -42,27 +42,24 @@ def render_migration_tool():
                     'Rake Rel. Date/Time': 'release_dt', 'Unloading Duration': 'u_duration', 'Rake Rel. Duration': 'r_duration',
                     'Cycle Time': 'r_duration', 'Demurrage (Hrs)': 'demurrage', 'REMARKS': 'remarks',
                     'NTH': 'nth', 'MUTH': 'muth', 'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 
-                    'GCV': 'gcv', 'VM': 'vm', 'month_tab': 'month_tab'
+                    'GCV': 'gcv', 'VM': 'vm', 'month_tab': 'month_tab', 'Demurrage (in Rs)': 'demurrage_in_rs'
                 }
                 df_mig = df_mig.rename(columns=rename_map)
                 
                 valid_columns = list(rename_map.values())
                 df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
                 
-                # Force strict Indian Date Parsing
                 date_cols = ['receipt_dt', 'placement_dt', 'ul_end_dt', 'release_dt']
                 for col in date_cols:
                     if col in df_mig.columns:
                         df_mig[col] = df_mig[col].apply(utils.safe_datetime_parse)
                 
-                # Robust cleaning for numeric columns to prevent "XXXX" or text conversion crashes
-                numeric_cols = ['sr_no', 'demurrage', 'nth', 'muth', 'wt1', 'wt2', 'wt3', 'wt4', 'gcv', 'vm']
+                numeric_cols = ['sr_no', 'demurrage', 'demurrage_in_rs', 'nth', 'muth', 'wt1', 'wt2', 'wt3', 'wt4', 'gcv', 'vm']
                 for col in numeric_cols:
                     if col in df_mig.columns:
                         def clean_numeric(val):
                             if pd.isna(val): return None
                             try:
-                                # Extract first valid float/int found in string (e.g. "24 (17:20)" -> 24)
                                 val_str = str(val).strip()
                                 if val_str.upper() in ['XXXX', 'XX', 'NAN', '', 'NONE']: return None
                                 match = re.search(r'[-+]?\d*\.\d+|\d+', val_str)
