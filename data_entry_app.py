@@ -52,5 +52,4 @@ if is_super_admin:
     with tabs[4]:
         admin_tools.render_mine_wise(df_all, today_ist)
     with tabs[5]:
-        # --- NEW BUNCHING REPORT FUNCTION ---
         admin_tools.render_bunching_report(df_all, today_ist)
