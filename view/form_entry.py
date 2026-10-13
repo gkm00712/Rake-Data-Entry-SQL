@@ -35,8 +35,9 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                 if (now_ist - rec_dt_aware).total_seconds() > 96 * 3600:
                     blocked_rakes.append(rake_val)
 
+    # --- INCREASED TO 10 NOS PARTIAL LIMIT ---
     if all_partial_rakes:
-        st.warning(f"⚠️ **Pending Partial Rakes ({len(all_partial_rakes)}/5):** The following rakes are incomplete and need to be edited to finalize: **{', '.join(all_partial_rakes)}**")
+        st.warning(f"⚠️ **Pending Partial Rakes ({len(all_partial_rakes)}/10):** The following rakes are incomplete and need to be edited to finalize: **{', '.join(all_partial_rakes)}**")
 
     col_mode, col_edit, col_warn = st.columns([1.5, 2, 3], gap="small")
     with col_mode:
@@ -54,9 +55,10 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             st.rerun()
 
     if entry_mode == "➕ New Entry":
-        if (blocked_rakes or len(all_partial_rakes) >= 5) and not is_super_admin:
+        # --- INCREASED TO 10 NOS PARTIAL LIMIT ---
+        if (blocked_rakes or len(all_partial_rakes) >= 10) and not is_super_admin:
             if blocked_rakes: st.error(f"🚨 **SYSTEM LOCKED (96-HOUR RULE):** The following Partial Rakes have been pending for > 96 hours: **{', '.join(blocked_rakes)}**")
-            if len(all_partial_rakes) >= 5: st.error(f"🚨 **SYSTEM LOCKED (5-RAKE LIMIT):** There are currently {len(all_partial_rakes)} pending partial rakes. Maximum allowed is 5.")
+            if len(all_partial_rakes) >= 10: st.error(f"🚨 **SYSTEM LOCKED (10-RAKE LIMIT):** There are currently {len(all_partial_rakes)} pending partial rakes. Maximum allowed is 10.")
             st.error("You MUST switch to '✏️ Edit Existing', fill their missing data, and uncheck 'Partial Entry' before making any new entries.")
             show_form = False
         else:
@@ -67,13 +69,18 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
         
     elif entry_mode == "✏️ Edit Existing":
         df_dropdown = df_all.copy()
+        # --- ENFORCE DESCENDING CHRONOLOGICAL ORDER (NEWEST FIRST) ---
+        if 'Parsed_DateTime' in df_dropdown.columns:
+            df_dropdown = df_dropdown.sort_values(by='Parsed_DateTime', ascending=False)
+            
         existing_rakes = [str(r) for r in df_dropdown.get('RAKE No', pd.Series(dtype=str)).astype(str).str.strip().str.lstrip("'").tolist() if str(r).lower() not in ['nan', 'none', '<na>', '']]
-        unique_rakes = list(dict.fromkeys(reversed(existing_rakes)))
-        unique_rakes.reverse()
-        display_rakes = unique_rakes if is_super_admin else unique_rakes[-25:]
+        unique_rakes = list(dict.fromkeys(existing_rakes)) # Maintains descending order
+        
+        # --- OPERATOR 20 NOS LIMIT (DESCENDING) ---
+        display_rakes = unique_rakes if is_super_admin else unique_rakes[:20]
         
         if display_rakes:
-            options = list(reversed(display_rakes))
+            options = display_rakes
             sel_idx = options.index(st.session_state.current_edit_rake) if st.session_state.current_edit_rake in options else 0
             
             with col_edit:
@@ -248,6 +255,7 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             dt_rel = config.IST.localize(datetime.combine(d_rel, ti_rel)) if d_rel and ti_rel else None
 
             u_duration_str, r_duration_str, demurrage_val, timeline_valid = "00:00", "00:00", 0, True
+            demurrage_rs = 0
 
             if is_partial:
                 if not dt_rec: 
@@ -269,6 +277,11 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                 free_time = 7.0 if w_type == "N" else 2.0
                 if r_hours > free_time: demurrage_val = math.ceil(r_hours - free_time)
                 if is_ntpc_owned: demurrage_val = 0
+                
+                # --- CALCULATE DEMURRAGE IN RS ---
+                if demurrage_val > 0:
+                    demurrage_rs = int(demurrage_val * w_qty * 150)
+                    if is_ntpc_owned: demurrage_rs = 0
 
             if timeline_valid:
                 for dt_val, lbl in [(dt_rec, "Receipt"), (dt_pla, "Placement"), (dt_end, "U/L End"), (dt_rel, "Release")]:
@@ -665,16 +678,20 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                     try: return int(float(val)) if pd.notna(val) else 0
                     except: return 0
                     
+                # --- SUBMIT ACTUAL DATETIME OBJECTS AND CALCULATED DEMURRAGE IN RS ---
                 payload = {
                     "action": "save", "tab_name": month_tab_name, "sr_no": sr_no, "rake_no": rake_no, "source": source, "wagon_spec": wagon_spec,
-                    "receipt": f"{d_rec.strftime('%d.%m.%Y')}/{ti_rec.strftime('%H:%M')}" if d_rec and ti_rec else "",
-                    "placement": f"{d_pla.strftime('%d.%m.%Y')}/{ti_pla.strftime('%H:%M')}" if d_pla and ti_pla else "",
-                    "u_end": f"{d_end.strftime('%d.%m.%Y')}/{ti_end.strftime('%H:%M')}" if d_end and ti_end else "",
-                    "release": f"{d_rel.strftime('%d.%m.%Y')}/{ti_rel.strftime('%H:%M')}" if d_rel and ti_rel else "",
+                    "receipt": datetime.combine(d_rec, ti_rec) if d_rec and ti_rec else None,
+                    "placement": datetime.combine(d_pla, ti_pla) if d_pla and ti_pla else None,
+                    "u_end": datetime.combine(d_end, ti_end) if d_end and ti_end else None,
+                    "release": datetime.combine(d_rel, ti_rel) if d_rel and ti_rel else None,
                     "u_duration": f"'{u_duration_str}" if not is_partial else "", 
                     "r_duration": f"'{r_duration_str}" if not is_partial else "", 
-                    "demurrage": safe_num(demurrage_val) if not is_partial else 0.0, "remarks": outage_summary, "nth": nth, "muth": muth, 
-                    "wt1": tippler_data["WT-1"], "wt2": tippler_data["WT-2"], "wt3": tippler_data["WT-3"], "wt4": tippler_data["WT-4"], "gcv": str(safe_int(gcv_val)) if gcv_val else "", "vm": safe_num(vm_val)
+                    "demurrage": safe_num(demurrage_val) if not is_partial else 0.0, 
+                    "demurrage_in_rs": demurrage_rs,
+                    "remarks": outage_summary, "nth": nth, "muth": muth, 
+                    "wt1": tippler_data["WT-1"], "wt2": tippler_data["WT-2"], "wt3": tippler_data["WT-3"], "wt4": tippler_data["WT-4"], 
+                    "gcv": str(safe_int(gcv_val)) if gcv_val else "", "vm": safe_num(vm_val)
                 }
                 
                 # --- NEW: POSTGRESQL DATABASE SAVE ---
