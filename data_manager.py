@@ -242,12 +242,9 @@ def save_whiteboard(wb_data):
 def load_long_outages():
     try:
         engine = get_db()
-        # Fetch all rows directly from the table
         query = "SELECT * FROM long_outages ORDER BY id ASC"
         df = pd.read_sql(query, con=engine)
-        
         if not df.empty:
-            # Return as a list of dictionaries matching the columns in Supabase
             return df.to_dict('records')
         return []
     except Exception as e: 
@@ -257,20 +254,22 @@ def load_long_outages():
 def save_long_outages(lo_list):
     try:
         engine = get_db()
-        
         with engine.begin() as conn:
-            # Clear old active outages
             conn.exec_driver_sql("TRUNCATE TABLE long_outages RESTART IDENTITY;")
             
-            # Save the new state matching the exact column names
             if lo_list:
-                df = pd.DataFrame(lo_list)
-                
-                if 'id' in df.columns:
-                    df = df.drop(columns=['id'])
+                for lo in lo_list:
+                    # Ignore id and created_at so Supabase can generate them
+                    excluded_keys = ['id', 'created_at', 'updated_at']
+                    clean_lo = {k: v for k, v in lo.items() if k not in excluded_keys}
                     
-                df.to_sql('long_outages', con=conn, if_exists='append', index=False)
-                
+                    keys = list(clean_lo.keys())
+                    columns_str = ", ".join(keys)
+                    placeholders = ", ".join([f"%({k})s" for k in keys])
+                    
+                    insert_query = f"INSERT INTO long_outages ({columns_str}) VALUES ({placeholders})"
+                    conn.exec_driver_sql(insert_query, clean_lo)
+                    
         load_long_outages.clear()
     except Exception as e:
         st.error(f"❌ Database Save Error: {e}")
