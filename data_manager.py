@@ -188,7 +188,7 @@ def save_new_rake_entry(entry_dict):
 def save_rake_to_db(entry_dict):
     return save_new_rake_entry(entry_dict)
 
-# --- WHITEBOARD WITH 24-HOUR AUTO-EXPIRY USING YOUR EXISTING TABLE ---
+# --- WHITEBOARD WITH 24-HOUR AUTO-EXPIRY USING EXISTING TABLE ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_whiteboard():
     try:
@@ -252,7 +252,8 @@ def load_long_outages():
             val = df.iloc[0]['data']
             return json.loads(val) if isinstance(val, str) else val
         return []
-    except Exception: return []
+    except Exception: 
+        return []
 
 def save_long_outages(lo_list):
     try:
@@ -265,4 +266,5 @@ def save_long_outages(lo_list):
                 (json_str,)
             )
         load_long_outages.clear()
-    except Exception as e: pass
+    except Exception as e:
+        st.error(f"❌ Database Save Error: {e}")
