@@ -2,7 +2,12 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
 import json
+import os
+import time
 import config
+import utils
+
+QUALITY_FILE = "quality_data.xlsx"
 
 # --- CONNECT TO SUPABASE ---
 def get_db():
@@ -10,7 +15,8 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-@st.cache_data(ttl=30)
+# --- FAST LOADING (10 Min Cache to prevent lag) ---
+@st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
     try:
         engine = get_db()
@@ -22,7 +28,7 @@ def get_all_excel_data():
             if 'receipt_dt' in df.columns:
                 df['Receipt Date/Time'] = df['receipt_dt']
                 df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], format='%d.%m.%Y/%H:%M', errors='coerce')
-                df['Parsed_Date'] = pd.to_datetime(df['receipt_dt'], format='%d.%m.%Y/%H:%M', errors='coerce').dt.date
+                df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
             if 'placement_dt' in df.columns: df['Placement Date/Time'] = df['placement_dt']
             if 'ul_end_dt' in df.columns: df['U/L End Date/Time'] = df['ul_end_dt']
             if 'release_dt' in df.columns: df['Rake Rel. Date/Time'] = df['release_dt']
@@ -50,10 +56,105 @@ def get_all_excel_data():
         st.error(f"Error fetching data from Supabase: {e}")
         return pd.DataFrame()
 
+# --- CHRONOLOGICAL RAKE NUMBERING ---
+def get_next_rake_details(df_all, today_ist):
+    try:
+        if df_all.empty or 'RAKE No' not in df_all.columns:
+            return 1, "001/001"
+            
+        df_clean = df_all.copy()
+        df_clean['RAKE No'] = df_clean['RAKE No'].astype(str).str.strip().str.lstrip("'")
+        df_clean = df_clean[~df_clean['RAKE No'].isin(['nan', '', 'None'])]
+        
+        if df_clean.empty: return 1, "001/001"
+            
+        last_row = df_clean.iloc[0] 
+        
+        try: calc_sr = int(float(last_row.get('Sr. No.', 0))) + 1
+        except: calc_sr = 1
+            
+        last_rake = str(last_row.get('RAKE No', ''))
+        last_date = last_row.get('Parsed_Date')
+        
+        if '/' in last_rake:
+            parts = last_rake.split('/')
+            len_a, len_b = len(parts[0]), len(parts[1])
+            
+            if today_ist.day == 1 and (pd.isnull(last_date) or last_date != today_ist):
+                return calc_sr, f"{1:0{len_a}d}/{int(parts[1])+1:0{len_b}d}"
+            else:
+                return calc_sr, f"{int(parts[0])+1:0{len_a}d}/{int(parts[1])+1:0{len_b}d}"
+                
+        return calc_sr, f"{calc_sr:03d}/{calc_sr:03d}"
+    except Exception:
+        return 1, "001/001"
+
+# --- QUALITY MASTER VLOOKUP LOGIC ---
+def lookup_gcv_vm(mine_input, company_input):
+    if not os.path.exists(QUALITY_FILE):
+        return None, None
+    try:
+        df = pd.read_excel(QUALITY_FILE, engine='openpyxl', header=None)
+        mine_search = str(mine_input).strip().upper()
+        co_search = str(company_input).strip().upper()
+        
+        search_sets = [(7, 8, 10, 11), (15, 16, 18, 19), (23, 24, 26, 27), (31, 32, 34, 35)]
+        mine_only_match = None
+        
+        for m_col, c_col, g_col, v_col in search_sets:
+            if m_col >= len(df.columns) or v_col >= len(df.columns):
+                continue
+            for _, row in df.iterrows():
+                sheet_mine = str(row[m_col]).strip().upper()
+                sheet_co = str(row[c_col]).strip().upper()
+                
+                if not sheet_mine or sheet_mine == "NAN": continue
+                
+                if sheet_mine == mine_search:
+                    raw_gcv = row[g_col]
+                    raw_vm = row[v_col]
+                    try: final_gcv = int(float(raw_gcv))
+                    except: final_gcv = 0
+                    try: final_vm = round(float(raw_vm), 2)
+                    except: final_vm = 0.00
+                    
+                    if final_gcv > 0:
+                        if sheet_co == co_search: return final_gcv, final_vm
+                        elif mine_only_match is None: mine_only_match = (final_gcv, final_vm)
+                        
+        if mine_only_match: return mine_only_match
+        return None, None
+    except Exception as e:
+        return None, None
+
+# --- SECURE SQL SAVE ---
 def save_new_rake_entry(entry_dict):
     try:
+        db_row = {
+            "month_tab": entry_dict.get("tab_name"),
+            "sr_no": entry_dict.get("sr_no"),
+            "rake_no": entry_dict.get("rake_no"),
+            "source": entry_dict.get("source"),
+            "wagon_spec": entry_dict.get("wagon_spec"),
+            "receipt_dt": utils.safe_datetime_parse(entry_dict.get("receipt")),
+            "placement_dt": utils.safe_datetime_parse(entry_dict.get("placement")),
+            "ul_end_dt": utils.safe_datetime_parse(entry_dict.get("u_end")),
+            "release_dt": utils.safe_datetime_parse(entry_dict.get("release")),
+            "u_duration": entry_dict.get("u_duration", "").replace("'", ""),
+            "r_duration": entry_dict.get("r_duration", "").replace("'", ""),
+            "demurrage": entry_dict.get("demurrage"),
+            "remarks": entry_dict.get("remarks"),
+            "nth": entry_dict.get("nth"),
+            "muth": entry_dict.get("muth"),
+            "wt1": entry_dict.get("wt1"),
+            "wt2": entry_dict.get("wt2"),
+            "wt3": entry_dict.get("wt3"),
+            "wt4": entry_dict.get("wt4"),
+            "gcv": entry_dict.get("gcv"),
+            "vm": entry_dict.get("vm")
+        }
         engine = get_db()
-        df_new = pd.DataFrame([entry_dict])
+        df_new = pd.DataFrame([db_row])
         with engine.begin() as connection:
             df_new.to_sql('rakes_data', con=connection, if_exists='append', index=False)
         get_all_excel_data.clear()
@@ -62,52 +163,38 @@ def save_new_rake_entry(entry_dict):
         st.error(f"Error saving rake entry: {e}")
         return False
 
-# Aliases expected by form_entry.py
 def save_rake_to_db(entry_dict):
     return save_new_rake_entry(entry_dict)
 
-def get_next_rake_details(df_all, today_ist):
-    try:
-        current_fy = today_ist.year if today_ist.month >= 4 else today_ist.year - 1
-        fy_str = f"{str(current_fy)[-2:]}-{str(current_fy + 1)[-2:]}"
-        
-        if df_all.empty or 'sr_no' not in df_all.columns:
-            return 1, f"001/{fy_str}"
-            
-        max_sr = int(df_all['sr_no'].max()) + 1
-        return max_sr, f"{max_sr:03d}/{fy_str}"
-    except Exception:
-        return 1, "001/26-27"
-
-def lookup_gcv_vm(source_name):
-    return 3500, 20.0
-
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_whiteboard():
     try:
         engine = get_db()
-        query = "SELECT * FROM whiteboard ORDER BY id DESC LIMIT 1"
+        query = "SELECT message FROM whiteboard ORDER BY id DESC LIMIT 1"
         df = pd.read_sql(query, con=engine)
-        if not df.empty:
-            return df.iloc[0].to_dict()
-        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
+        if not df.empty and df.iloc[0]['message']:
+            val = df.iloc[0]['message']
+            try: return json.loads(val)
+            except: return [{"text": val, "time": time.time()}]
+        return []
     except Exception:
-        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
+        return []
 
-def save_whiteboard(wb_dict):
+def save_whiteboard(wb_list):
     try:
         engine = get_db()
+        json_str = json.dumps(wb_list)
         with engine.begin() as conn:
             conn.exec_driver_sql("TRUNCATE TABLE whiteboard;")
             conn.exec_driver_sql(
-                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, %s, %s);",
-                (wb_dict.get('message'), wb_dict.get('updated_by'), wb_dict.get('updated_at'))
+                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, 'System', CURRENT_TIMESTAMP);",
+                (json_str,)
             )
         load_whiteboard.clear()
     except Exception as e:
         st.error(f"Error saving whiteboard: {e}")
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_long_outages():
     try:
         engine = get_db()
