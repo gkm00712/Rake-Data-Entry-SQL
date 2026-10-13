@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import re
 import config
 import io
-from openpyxl.utils import get_column_letter  # Added to safely handle >26 columns
+from openpyxl.utils import get_column_letter
 
 def safe_datetime_parse(val):
     if pd.isna(val): return None
@@ -63,7 +63,6 @@ def parse_outages(remarks_str):
         
         parts = line.split('|')
         if len(parts) >= 2:
-            # Strip emojis to get clean department name
             dept_raw = parts[0].strip().replace('⚪ ', '').replace('🔴 ', '').replace('🟢 ', '').replace('🔵 ', '').replace('🟠 ', '').replace('🟣 ', '').replace('🟡 ', '')
             
             dept = dept_raw
@@ -87,15 +86,12 @@ def parse_outages(remarks_str):
 def resolve_tippler_time(time_obj, base_dt, end_dt):
     if not time_obj or not base_dt or not end_dt: return None
     
-    # 1. Try same day as base
     dt_candidate = config.IST.localize(datetime.combine(base_dt.date(), time_obj))
     if base_dt <= dt_candidate <= end_dt: return dt_candidate
     
-    # 2. Try next day (overnight shifts)
     dt_candidate_next = config.IST.localize(datetime.combine(base_dt.date() + timedelta(days=1), time_obj))
     if base_dt <= dt_candidate_next <= end_dt: return dt_candidate_next
     
-    # 3. Try previous day (rare edge cases crossing midnight exactly)
     dt_candidate_prev = config.IST.localize(datetime.combine(base_dt.date() - timedelta(days=1), time_obj))
     if base_dt <= dt_candidate_prev <= end_dt: return dt_candidate_prev
     
@@ -107,7 +103,6 @@ def validate_time_window(dt_val, label, demurrage_val, is_super_admin, now_ist, 
         
     diff_hours = (now_ist - dt_val).total_seconds() / 3600.0
     
-    # 96 HOUR LIMIT FOR ALL OPERATORS
     if diff_hours > 96:
         return False, f"❌ {label} is older than 96 hours. Operators cannot log or edit data beyond 4 days."
         
@@ -118,27 +113,32 @@ def validate_time_window(dt_val, label, demurrage_val, is_super_admin, now_ist, 
 
 # --- BUG FIX: BULLETPROOF EXCEL FORMATTING ---
 def generate_formatted_excel(df):
+    # Strictly define the clean columns you actually want in your Excel report
+    cols_to_keep = [
+        'Sr. No.', 'RAKE No', 'Coal siding/ Company', '(BOXN / BOBR)', 
+        'Receipt Date/Time', 'Placement Date/Time', 'U/L End Date/Time', 
+        'Rake Rel. Date/Time', 'Unloading Duration', 'Cycle Time', 'Demurrage', 
+        'REMARKS', 'NTH', 'MUTH', 'WT-1', 'WT-2', 'WT-3', 'WT-4', 'GCV', 'VM'
+    ]
+                    
+    # Filter out raw SQL columns so only official columns print
+    clean_df = df[[c for c in cols_to_keep if c in df.columns]]
+    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Daily Report')
+        clean_df.to_excel(writer, index=False, sheet_name='Report')
         
         # Auto-adjust column widths safely
-        worksheet = writer.sheets['Daily Report']
-        for idx, col in enumerate(df.columns):
-            
-            # Safe calculation of string length (prevents TypeError on empty or weird data)
+        worksheet = writer.sheets['Report']
+        for idx, col in enumerate(clean_df.columns):
             col_header_len = len(str(col))
-            if len(df) > 0:
-                max_val_len = max([len(str(val)) for val in df[col].values])
+            if len(clean_df) > 0:
+                max_val_len = max([len(str(val)) for val in clean_df[col].astype(str).values])
             else:
                 max_val_len = 0
                 
             max_len = max(col_header_len, max_val_len) + 2
-            
-            # Use openpyxl to get exact column letter (A, B... Z, AA, AB)
             col_letter = get_column_letter(idx + 1)
-            
-            # Cap the maximum width at 50
             worksheet.column_dimensions[col_letter].width = min(max_len, 50)
             
     return output.getvalue()
