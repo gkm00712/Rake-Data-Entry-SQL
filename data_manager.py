@@ -68,7 +68,7 @@ def get_all_excel_data():
     except Exception as e:
         return pd.DataFrame()
 
-# --- PRECISE RAKE NUMBERING & APRIL 1ST / MONTHLY RESET ---
+# --- PRECISE CHRONOLOGICAL RAKE NUMBERING (+1/+1 & MONTHLY/ANNUAL RESETS) ---
 def get_next_rake_details(df_all, today_ist):
     try:
         if df_all.empty or 'RAKE No' not in df_all.columns:
@@ -81,16 +81,20 @@ def get_next_rake_details(df_all, today_ist):
         if df_clean.empty:
             return 1, "01/01"
             
-        last_row = df_clean.iloc[-1]  # Most recent entry
+        # Strictly sort by Receipt Date/Time descending to find the absolute latest entry by timestamp
+        if 'Parsed_DateTime' in df_clean.columns:
+            df_clean = df_clean.sort_values(by='Parsed_DateTime', ascending=False)
+            
+        last_row = df_clean.iloc[0] 
         last_rake = str(last_row.get('RAKE No', ''))
         last_date = last_row.get('Parsed_Date')
         
-        # Check if today is April 1st (Reset both to 01/01)
+        # April 1st Annual Reset Check
         if today_ist.month == 4 and today_ist.day == 1:
             if pd.isnull(last_date) or last_date != today_ist:
                 return 1, "01/01"
                 
-        # Check if it's a new month compared to the last entry
+        # Check if it's a new month
         is_new_month = False
         if pd.notnull(last_date):
             if today_ist.year > last_date.year or (today_ist.year == last_date.year and today_ist.month > last_date.month):
@@ -102,24 +106,31 @@ def get_next_rake_details(df_all, today_ist):
         if '/' in last_rake:
             parts = last_rake.split('/')
             try:
-                prev_month_seq = int(parts[0])
-                prev_abs_seq = int(parts[1])
+                prev_part1 = int(parts[0].strip())
+                prev_part2 = int(parts[1].strip())
+                
+                # Monthly reset or annual reset sets first part to 1, otherwise increment +1
+                if is_new_month or (today_ist.month == 4 and today_ist.day == 1):
+                    next_part1 = 1
+                else:
+                    next_part1 = prev_part1 + 1
+                    
+                # Second absolute part always increments +1
+                next_part2 = prev_part2 + 1
+                
+                len_a = len(parts[0].strip())
+                len_b = len(parts[1].strip())
+                
+                formatted_rake = f"{next_part1:0{len_a}d}/{next_part2:0{len_b}d}"
+                return calc_sr, formatted_rake
             except:
-                return calc_sr, f"{calc_sr:02d}/{calc_sr}"
+                pass
                 
-            if is_new_month or (today_ist.month == 4 and today_ist.day == 1):
-                new_month_seq = 1
-            else:
-                new_month_seq = prev_month_seq + 1
-                
-            new_abs_seq = prev_abs_seq + 1
-            return calc_sr, f"{new_month_seq:02d}/{new_abs_seq}"
-            
         return calc_sr, f"{calc_sr:02d}/{calc_sr}"
     except Exception:
         return 1, "01/01"
 
-# --- QUALITY MASTER VLOOKUP LOGIC (GCV & VM) ---
+# --- QUALITY MASTER VLOOKUP LOGIC (4-DIGIT GCV & 2-DIGIT VM) ---
 def lookup_gcv_vm(mine_input, company_input):
     if not os.path.exists(QUALITY_FILE):
         return None, None
@@ -143,9 +154,9 @@ def lookup_gcv_vm(mine_input, company_input):
                 if sheet_mine == mine_search:
                     raw_gcv = row[g_col]
                     raw_vm = row[v_col]
-                    try: final_gcv = int(float(raw_gcv)) # 4-digit GCV
+                    try: final_gcv = int(float(raw_gcv))
                     except: final_gcv = 0
-                    try: final_vm = round(float(raw_vm), 2) # 2-digit VM
+                    try: final_vm = round(float(raw_vm), 2)
                     except: final_vm = 0.00
                     
                     if final_gcv > 0:
