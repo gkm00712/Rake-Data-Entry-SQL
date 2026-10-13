@@ -1,6 +1,6 @@
 import streamlit as st
 import config
-import time
+import copy
 from datetime import datetime
 from data_manager import save_whiteboard, save_long_outages
 
@@ -17,7 +17,6 @@ def render_whiteboard(wb_data):
     with st.container(border=True):
         st.markdown("##### 📋 Whiteboard / Shift Notes *(Auto-deletes after 24 hours)*")
         
-        # --- AVAILABLE TO BOTH: ADD NOTE (Horizontal Expander) ---
         with st.expander("➕ Add New Shift Note", expanded=False):
             with st.form("wb_add_form", clear_on_submit=True):
                 col1, col2 = st.columns([1, 3])
@@ -32,14 +31,13 @@ def render_whiteboard(wb_data):
                         st.error("❌ Message cannot be empty!")
                     else:
                         now_ist = datetime.now(config.IST)
-                        wb_data.append({
+                        updated_wb = copy.deepcopy(wb_data)
+                        updated_wb.append({
                             "title": note_title.strip(),
                             "content": note_content.strip(),
                             "timestamp": now_ist.isoformat()
                         })
-                        save_whiteboard(wb_data)
-                        st.success("✅ Note posted!")
-                        time.sleep(0.5) # Gives database time to save before refresh
+                        save_whiteboard(updated_wb)
                         st.rerun()
 
         if not wb_data:
@@ -48,8 +46,6 @@ def render_whiteboard(wb_data):
             
         st.markdown("---")
         for idx, note in enumerate(wb_data):
-            
-            # Extract and format the timestamp so it punches visibly
             time_str = ""
             ts = note.get('timestamp', '')
             if ts:
@@ -65,14 +61,13 @@ def render_whiteboard(wb_data):
             with cols[0]:
                 st.markdown("📌")
             with cols[1]:
-                # --- PRINTING DATE AND TIME HERE ---
                 st.markdown(f"**{note.get('title', 'Note')}**{time_display}: {note.get('content', '')}")
             
-            # --- AVAILABLE TO BOTH: DELETE NOTE ---
             with cols[2]:
                 if st.button("❌", key=f"del_wb_{idx}", help="Delete this whiteboard note"):
-                    wb_data.pop(idx)
-                    save_whiteboard(wb_data)
+                    updated_wb = copy.deepcopy(wb_data)
+                    updated_wb.pop(idx)
+                    save_whiteboard(updated_wb)
                     st.rerun()
 
 def render_long_outages(lo_data, today_ist, is_super_admin):
@@ -80,7 +75,6 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
     with st.container(border=True):
         st.markdown("##### 🚨 Active Equipment Long Outages")
             
-        # --- AVAILABLE TO BOTH: ADD LONG OUTAGE (Horizontal Expander) ---
         with st.expander("➕ Log New Equipment Outage", expanded=False):
             with st.form("lo_add_form", clear_on_submit=True):
                 c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1])
@@ -106,20 +100,20 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                             "affects": affects,
                             "status": "ongoing"
                         }
-                        lo_data.append(new_lo)
-                        save_long_outages(lo_data)
-                        st.success("✅ Long Outage Added!")
-                        time.sleep(0.5) # Gives database time to save before refresh
+                        
+                        # Safely modify data using deepcopy to bypass Streamlit cache lock
+                        updated_lo = copy.deepcopy(lo_data)
+                        updated_lo.append(new_lo)
+                        
+                        save_long_outages(updated_lo)
                         st.rerun()
 
-        # Recalculate active outages right before display
         active_los = [lo for lo in lo_data if lo.get('status') != 'restored']
 
         if not active_los:
             st.caption("No active long outages.")
             return
             
-        # --- HORIZONTAL LAYOUT DISPLAY ---
         st.markdown("---")
         h1, h2, h3, h4, h5 = st.columns([1.5, 2, 2, 4, 1.5] if is_super_admin else [1.5, 2, 2, 5, 0.1])
         with h1: st.markdown("**Dept**")
@@ -143,20 +137,21 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
             with cols[2]: st.markdown(f"{since}")
             with cols[3]: st.markdown(f"*{reason}*")
             
-            # --- AVAILABLE TO ADMIN ONLY: RESTORE & DELETE ---
             if is_super_admin:
                 with cols[4]:
                     c1, c2 = st.columns(2)
                     with c1:
-                        if st.button("🔄", key=f"res_lo_{idx}", help="Mark as Restored (Will be automatically logged in the next finalized rake's remarks)"):
+                        if st.button("🔄", key=f"res_lo_{idx}", help="Mark as Restored"):
                             now_ist = datetime.now(config.IST)
-                            lo['status'] = 'restored'
-                            lo['rest_date'] = now_ist.strftime('%d.%m')
-                            lo['rest_time'] = now_ist.strftime('%H:%M')
-                            save_long_outages(lo_data)
+                            updated_lo = copy.deepcopy(lo_data)
+                            updated_lo[idx]['status'] = 'restored'
+                            updated_lo[idx]['rest_date'] = now_ist.strftime('%d.%m')
+                            updated_lo[idx]['rest_time'] = now_ist.strftime('%H:%M')
+                            save_long_outages(updated_lo)
                             st.rerun()
                     with c2:
                         if st.button("❌", key=f"del_lo_{idx}", help="Delete permanently"):
-                            lo_data.pop(idx)
-                            save_long_outages(lo_data)
+                            updated_lo = copy.deepcopy(lo_data)
+                            updated_lo.pop(idx)
+                            save_long_outages(updated_lo)
                             st.rerun()
