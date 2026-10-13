@@ -8,9 +8,9 @@ import utils
 from data_manager import get_next_rake_details, save_long_outages, get_all_excel_data, lookup_gcv_vm, save_rake_to_db
 
 def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data_current):
-    # --- 96-HOUR (4-DAY) WINDOW FOR OPERATORS ---
+    # --- 72-HOUR (3-DAY) WINDOW FOR OPERATORS ---
     if not is_super_admin:
-        min_date_allowed = today_ist - timedelta(days=4)
+        min_date_allowed = today_ist - timedelta(days=3)
 
     default_sr = 1; default_rake = ""; default_source = ""; default_qty = 58; default_type_idx = 0; default_nth = ""; default_muth = ""; default_gcv = 0; default_vm = 0.00
     d_rec_def = None; t_rec_def = None; d_pla_def = None; t_pla_def = None; d_end_def = None; t_end_def = None; d_rel_def = None; t_rel_def = None
@@ -31,11 +31,10 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             rec_dt = row.get('Parsed_DateTime')
             if pd.notnull(rec_dt) and isinstance(rec_dt, datetime):
                 rec_dt_aware = config.IST.localize(rec_dt)
-                # 96 HOUR LIMIT FOR PARTIAL RAKES
-                if (now_ist - rec_dt_aware).total_seconds() > 96 * 3600:
+                # --- 72 HOUR LIMIT FOR PARTIAL RAKES ---
+                if (now_ist - rec_dt_aware).total_seconds() > 72 * 3600:
                     blocked_rakes.append(rake_val)
 
-    # --- INCREASED TO 10 NOS PARTIAL LIMIT ---
     if all_partial_rakes:
         st.warning(f"⚠️ **Pending Partial Rakes ({len(all_partial_rakes)}/10):** The following rakes are incomplete and need to be edited to finalize: **{', '.join(all_partial_rakes)}**")
 
@@ -55,9 +54,8 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             st.rerun()
 
     if entry_mode == "➕ New Entry":
-        # --- INCREASED TO 10 NOS PARTIAL LIMIT ---
         if (blocked_rakes or len(all_partial_rakes) >= 10) and not is_super_admin:
-            if blocked_rakes: st.error(f"🚨 **SYSTEM LOCKED (96-HOUR RULE):** The following Partial Rakes have been pending for > 96 hours: **{', '.join(blocked_rakes)}**")
+            if blocked_rakes: st.error(f"🚨 **SYSTEM LOCKED (72-HOUR RULE):** The following Partial Rakes have been pending for > 72 hours: **{', '.join(blocked_rakes)}**")
             if len(all_partial_rakes) >= 10: st.error(f"🚨 **SYSTEM LOCKED (10-RAKE LIMIT):** There are currently {len(all_partial_rakes)} pending partial rakes. Maximum allowed is 10.")
             st.error("You MUST switch to '✏️ Edit Existing', fill their missing data, and uncheck 'Partial Entry' before making any new entries.")
             show_form = False
@@ -69,14 +67,12 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
         
     elif entry_mode == "✏️ Edit Existing":
         df_dropdown = df_all.copy()
-        # --- ENFORCE DESCENDING CHRONOLOGICAL ORDER (NEWEST FIRST) ---
         if 'Parsed_DateTime' in df_dropdown.columns:
             df_dropdown = df_dropdown.sort_values(by='Parsed_DateTime', ascending=False)
             
         existing_rakes = [str(r) for r in df_dropdown.get('RAKE No', pd.Series(dtype=str)).astype(str).str.strip().str.lstrip("'").tolist() if str(r).lower() not in ['nan', 'none', '<na>', '']]
-        unique_rakes = list(dict.fromkeys(existing_rakes)) # Maintains descending order
+        unique_rakes = list(dict.fromkeys(existing_rakes))
         
-        # --- OPERATOR 20 NOS LIMIT (DESCENDING) ---
         display_rakes = unique_rakes if is_super_admin else unique_rakes[:20]
         
         if display_rakes:
@@ -197,10 +193,10 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                     existing_rakes = df_clean['RAKE No'].tolist()
                     if rake_no not in existing_rakes and len(existing_rakes) > 0:
                         last_rake = existing_rakes[-1]
-                        if '/' in last_rake and '/' in rake_no:
+                        if '/' in str(last_rake) and '/' in str(rake_no):
                             try:
-                                prev_a, prev_b = map(int, last_rake.split('/'))
-                                curr_a, curr_b = map(int, rake_no.split('/'))
+                                prev_a, prev_b = map(int, str(last_rake).split('/'))
+                                curr_a, curr_b = map(int, str(rake_no).split('/'))
                                 if not is_super_admin:
                                     is_valid_sequence = False
                                     if (curr_a == 1) and (curr_b == 1): 
@@ -211,7 +207,7 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                                         is_valid_sequence = True
                                         
                                     if not is_valid_sequence:
-                                        len_a, len_b = len(last_rake.split('/')[0]), len(last_rake.split('/')[1])
+                                        len_a, len_b = len(str(last_rake).split('/')[0]), len(str(last_rake).split('/')[1])
                                         st.error(f"❌ **Sequence Error:** The last RAKE was **{last_rake}**. Valid sequences: Normal days (+1/+1), start of month (01/+1), or April 1st (01/0001).")
                                         form_is_valid = False
                             except ValueError: pass
@@ -295,7 +291,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
             with st.container(border=True):
                 st.markdown("##### 3. Tippler Operations")
                 
-                # --- FOOLPROOF UI: MASTER SWITCH FOR TIPPLER ASSIGNMENT ---
                 if is_partial and w_type == "N":
                     st.markdown("**🚨 Tippler Assignment (Mandatory)**")
                     a_idx = 1 if def_assignment_type == "Rake Waiting" else 0
@@ -321,7 +316,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                             st.error("❌ You MUST select at least one Tippler.")
                             form_is_valid = False
                     else:
-                        # Rake Waiting is selected, lock out multiselect
                         tippler_status = ["Rake Waiting"]
                         st.info("ℹ️ Rake will be safely marked as waiting for a tippler.")
                         
@@ -624,7 +618,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                 month_tab_name = tab_date.strftime('%b-%y').upper()
                 outage_summary = "\n".join([o["Log"] for o in st.session_state.outages_list])
                 
-                # --- AUTO-STAMP TIPPLER ASSIGNMENT TO PAYLOAD ---
                 if is_partial and w_type == "N" and isinstance(tippler_status, list):
                     for t_stat in tippler_status:
                         if t_stat.startswith("WT-"):
@@ -662,7 +655,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                 if is_ntpc_owned:
                     outage_summary = (outage_summary + "\n⚪ OTHER | NTPC OWNED RAKE").strip()
                     
-                # --- ADD WAITING STATUS TO REMARKS ---
                 if is_partial and w_type == "N" and isinstance(tippler_status, list) and "Rake Waiting" in tippler_status:
                     outage_summary = (outage_summary + "\n⚪ OTHER | RAKE WAITING FOR TIPPLER").strip()
                 
@@ -678,7 +670,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                     try: return int(float(val)) if pd.notna(val) else 0
                     except: return 0
                     
-                # --- SUBMIT ACTUAL DATETIME OBJECTS AND CALCULATED DEMURRAGE IN RS ---
                 payload = {
                     "action": "save", "tab_name": month_tab_name, "sr_no": sr_no, "rake_no": rake_no, "source": source, "wagon_spec": wagon_spec,
                     "receipt": datetime.combine(d_rec, ti_rec) if d_rec and ti_rec else None,
@@ -694,7 +685,6 @@ def render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admi
                     "gcv": str(safe_int(gcv_val)) if gcv_val else "", "vm": safe_num(vm_val)
                 }
                 
-                # --- NEW: POSTGRESQL DATABASE SAVE ---
                 with st.spinner(f"Saving to secure database..."):
                     try:
                         save_rake_to_db(payload)
