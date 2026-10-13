@@ -188,17 +188,16 @@ def save_new_rake_entry(entry_dict):
 def save_rake_to_db(entry_dict):
     return save_new_rake_entry(entry_dict)
 
-# --- WHITEBOARD WITH 24-HOUR AUTO-EXPIRY USING EXISTING TABLE ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_whiteboard():
     try:
         engine = get_db()
-        query = "SELECT message FROM whiteboard ORDER BY id DESC LIMIT 1"
+        # Removed ORDER BY id to prevent silent crashes
+        query = "SELECT message FROM whiteboard"
         df = pd.read_sql(query, con=engine)
-        if not df.empty and df.iloc[0]['message']:
-            val = df.iloc[0]['message']
+        if not df.empty:
+            val = df.iloc[-1]['message'] # Get the latest row safely
             try:
-                # We store the list of notes as a JSON string in the 'message' column
                 notes = json.loads(val)
                 if isinstance(notes, list):
                     now_ist = datetime.now(config.IST)
@@ -210,22 +209,18 @@ def load_whiteboard():
                                 note_dt = datetime.fromisoformat(timestamp_str)
                                 if note_dt.tzinfo is None:
                                     note_dt = config.IST.localize(note_dt)
-                                # Keep only notes less than 24 hours old
                                 if (now_ist - note_dt).total_seconds() <= 24 * 3600:
                                     valid_notes.append(note)
                             except:
                                 valid_notes.append(note)
                     return valid_notes
-            except:
-                pass
-    except Exception:
-        pass
+            except: pass
+    except Exception: pass
     return []
 
 def save_whiteboard(wb_data):
     try:
         now_ist = datetime.now(config.IST)
-        # Ensure every note has a timestamp
         for note in wb_data:
             if 'timestamp' not in note or not note['timestamp']:
                 note['timestamp'] = now_ist.isoformat()
@@ -246,13 +241,16 @@ def save_whiteboard(wb_data):
 def load_long_outages():
     try:
         engine = get_db()
-        query = "SELECT data FROM long_outages ORDER BY id DESC LIMIT 1"
+        # Removed ORDER BY id dependency
+        query = "SELECT data FROM long_outages"
         df = pd.read_sql(query, con=engine)
-        if not df.empty and df.iloc[0]['data']:
-            val = df.iloc[0]['data']
-            return json.loads(val) if isinstance(val, str) else val
+        if not df.empty:
+            val = df.iloc[-1]['data'] # Pull from the most recent row
+            if val:
+                return json.loads(val) if isinstance(val, str) else val
         return []
-    except Exception: 
+    except Exception as e: 
+        st.error(f"Load Error (Long Outages): {e}") # If it fails, print exactly why!
         return []
 
 def save_long_outages(lo_list):
