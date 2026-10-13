@@ -12,22 +12,37 @@ cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
 
 def render_migration_tool():
     st.markdown("---")
-    st.subheader("📥 Migrate Historical Google Sheet to Supabase")
-    st.info("Upload your exported Excel file (.xlsx) here to bulk-insert historical records into your database.")
+    st.subheader("📥 Migrate Multi-Tab Master Database to Supabase")
+    st.info("Upload your multi-tab Excel master file (.xlsx) here to bulk-insert all monthly sheets (SEP-26, AUG-26, etc.) into your database.")
     
-    uploaded_file = st.file_uploader("Upload your exported Excel file (.xlsx)", type=["xlsx"], key="mig_file")
-    clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Fixes corrupted dates)", value=True)
+    uploaded_file = st.file_uploader("Upload Master Database (.xlsx)", type=["xlsx"], key="mig_file")
+    clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Recommended)", value=True)
     
-    if uploaded_file and st.button("🚀 Push Historical Data to Supabase", type="primary"):
-        with st.spinner("Processing strictly formatted dates..."):
+    if uploaded_file and st.button("🚀 Push All Tabs to Supabase", type="primary"):
+        with st.spinner("Processing and combining all monthly sheets..."):
             try:
-                df_mig = pd.read_excel(uploaded_file)
+                xls = pd.ExcelFile(uploaded_file)
+                all_sheets_data = []
+                
+                for sheet_name in xls.sheet_names:
+                    df_sheet = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+                    if not df_sheet.empty:
+                        df_sheet['month_tab'] = sheet_name.strip().upper()
+                        all_sheets_data.append(df_sheet)
+                
+                if not all_sheets_data:
+                    st.error("❌ No data found across any sheets in the uploaded file.")
+                    return
+                
+                df_mig = pd.concat(all_sheets_data, ignore_index=True)
+                
                 rename_map = {
                     'Sr. No.': 'sr_no', 'RAKE No': 'rake_no', 'Coal siding/ Company': 'source', '(BOXN / BOBR)': 'wagon_spec',
                     'Receipt Date/Time': 'receipt_dt', 'Placement Date/Time': 'placement_dt', 'U/L End Date/Time': 'ul_end_dt',
                     'Rake Rel. Date/Time': 'release_dt', 'Unloading Duration': 'u_duration', 'Rake Rel. Duration': 'r_duration',
                     'Cycle Time': 'r_duration', 'Demurrage (Hrs)': 'demurrage', 'REMARKS': 'remarks',
-                    'NTH': 'nth', 'MUTH': 'muth', 'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 'GCV': 'gcv', 'VM': 'vm'
+                    'NTH': 'nth', 'MUTH': 'muth', 'WT-1': 'wt1', 'WT-2': 'wt2', 'WT-3': 'wt3', 'WT-4': 'wt4', 
+                    'GCV': 'gcv', 'VM': 'vm', 'month_tab': 'month_tab'
                 }
                 df_mig = df_mig.rename(columns=rename_map)
                 
@@ -50,9 +65,10 @@ def render_migration_tool():
                         connection.exec_driver_sql("TRUNCATE TABLE rakes_data;")
                     df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
                     
-                st.success("✅ Migration completed successfully! Dates and Chronological sorting are permanently fixed.")
+                st.success(f"✅ Successfully migrated {len(df_mig)} total records across {len(xls.sheet_names)} monthly tabs (SEP-26, AUG-26, etc.) into Supabase!")
                 get_all_excel_data.clear() 
-            except Exception as e: st.error(f"❌ Error during migration: {e}")
+            except Exception as e: 
+                st.error(f"❌ Error during multi-tab migration: {e}")
 
 def render_yearly_tab(df_all, today_ist):
     st.info("💡 Yearly reports are based on the Financial Year (April 1st to March 31st).")
@@ -66,7 +82,6 @@ def render_yearly_tab(df_all, today_ist):
                 
                 if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
                 else:
-                    # Explicitly sort chronologically by Absolute Rake No (Ascending) before displaying
                     if 'RAKE No' in filtered_df.columns:
                         def get_abs(r):
                             try:
