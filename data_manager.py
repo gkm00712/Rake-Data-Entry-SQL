@@ -15,7 +15,7 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-# --- FAST LOADING (10 Min Cache to prevent lag) ---
+# --- FAST LOADING & CORRECT SQL DATE PARSING ---
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
     try:
@@ -26,16 +26,22 @@ def get_all_excel_data():
         if not df.empty:
             # Map database columns back to what the UI / reports expect
             if 'receipt_dt' in df.columns:
-                df['Receipt Date/Time'] = df['receipt_dt']
-                df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], format='%d.%m.%Y/%H:%M', errors='coerce')
+                df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], errors='coerce')
                 df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
-            if 'placement_dt' in df.columns: df['Placement Date/Time'] = df['placement_dt']
-            if 'ul_end_dt' in df.columns: df['U/L End Date/Time'] = df['ul_end_dt']
-            if 'release_dt' in df.columns: df['Rake Rel. Date/Time'] = df['release_dt']
+                df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d.%m.%Y/%H:%M').fillna('')
+                
+            if 'placement_dt' in df.columns: 
+                df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], errors='coerce').dt.strftime('%d.%m.%Y/%H:%M').fillna('')
+            if 'ul_end_dt' in df.columns: 
+                df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], errors='coerce').dt.strftime('%d.%m.%Y/%H:%M').fillna('')
+            if 'release_dt' in df.columns: 
+                df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], errors='coerce').dt.strftime('%d.%m.%Y/%H:%M').fillna('')
+                
             if 'u_duration' in df.columns: 
-                df['Unloading Duration'] = pd.to_datetime(df['u_duration'], format='%H:%M:%S', errors='coerce').dt.time
+                df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
             if 'r_duration' in df.columns: 
-                df['Cycle Time'] = pd.to_datetime(df['r_duration'], format='%H:%M:%S', errors='coerce').dt.time
+                df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
+                
             if 'demurrage' in df.columns: df['Demurrage'] = df['demurrage']
             if 'rake_no' in df.columns: df['RAKE No'] = df['rake_no']
             if 'source' in df.columns: df['Coal siding/ Company'] = df['source']
