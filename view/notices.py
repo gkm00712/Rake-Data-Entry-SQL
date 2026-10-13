@@ -1,5 +1,6 @@
 import streamlit as st
 import config
+import time
 from datetime import datetime
 from data_manager import save_whiteboard, save_long_outages
 
@@ -18,7 +19,7 @@ def render_whiteboard(wb_data):
         
         # --- AVAILABLE TO BOTH: ADD NOTE (Horizontal Expander) ---
         with st.expander("➕ Add New Shift Note", expanded=False):
-            with st.form("wb_add_form"):
+            with st.form("wb_add_form", clear_on_submit=True):
                 col1, col2 = st.columns([1, 3])
                 with col1:
                     note_title = st.text_input("Title / Shift", value="Shift Note")
@@ -26,16 +27,20 @@ def render_whiteboard(wb_data):
                     note_content = st.text_input("Message / Instruction")
                     
                 submitted = st.form_submit_button("Post Note", type="primary")
-                if submitted and note_content:
-                    now_ist = datetime.now(config.IST)
-                    wb_data.append({
-                        "title": note_title.strip(),
-                        "content": note_content.strip(),
-                        "timestamp": now_ist.isoformat()
-                    })
-                    save_whiteboard(wb_data)
-                    st.success("✅ Note posted!")
-                    st.rerun()
+                if submitted:
+                    if not note_content:
+                        st.error("❌ Message cannot be empty!")
+                    else:
+                        now_ist = datetime.now(config.IST)
+                        wb_data.append({
+                            "title": note_title.strip(),
+                            "content": note_content.strip(),
+                            "timestamp": now_ist.isoformat()
+                        })
+                        save_whiteboard(wb_data)
+                        st.success("✅ Note posted!")
+                        time.sleep(0.5) # Gives database time to save before refresh
+                        st.rerun()
 
         if not wb_data:
             st.caption("No active shift notes.")
@@ -71,15 +76,13 @@ def render_whiteboard(wb_data):
                     st.rerun()
 
 def render_long_outages(lo_data, today_ist, is_super_admin):
-    active_los = [lo for lo in lo_data if lo.get('status') != 'restored']
-
     st.markdown("<br>", unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown("##### 🚨 Active Equipment Long Outages")
             
         # --- AVAILABLE TO BOTH: ADD LONG OUTAGE (Horizontal Expander) ---
         with st.expander("➕ Log New Equipment Outage", expanded=False):
-            with st.form("lo_add_form"):
+            with st.form("lo_add_form", clear_on_submit=True):
                 c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1])
                 with c1: dept = st.selectbox("Dept", ["MM", "EMD", "C&I", "OPR", "MGR", "CHEM", "OTHER"])
                 with c2: equip = st.text_input("Equipment (e.g., WT-1)")
@@ -90,20 +93,27 @@ def render_long_outages(lo_data, today_ist, is_super_admin):
                 reason = st.text_input("Reason for Outage")
                 
                 submitted = st.form_submit_button("Add Long Outage", type="primary")
-                if submitted and equip and reason:
-                    new_lo = {
-                        "dept": dept,
-                        "equip": equip.strip().upper(),
-                        "since_date": since_date.strftime('%d.%m'),
-                        "since_time": since_time.strftime('%H:%M') if since_time else "00:00",
-                        "reason": reason.strip().upper(),
-                        "affects": affects,
-                        "status": "ongoing"
-                    }
-                    lo_data.append(new_lo)
-                    save_long_outages(lo_data)
-                    st.success("✅ Long Outage Added!")
-                    st.rerun()
+                if submitted:
+                    if not equip or not reason:
+                        st.error("❌ Both Equipment Name and Reason are mandatory!")
+                    else:
+                        new_lo = {
+                            "dept": dept,
+                            "equip": equip.strip().upper(),
+                            "since_date": since_date.strftime('%d.%m'),
+                            "since_time": since_time.strftime('%H:%M') if since_time else "00:00",
+                            "reason": reason.strip().upper(),
+                            "affects": affects,
+                            "status": "ongoing"
+                        }
+                        lo_data.append(new_lo)
+                        save_long_outages(lo_data)
+                        st.success("✅ Long Outage Added!")
+                        time.sleep(0.5) # Gives database time to save before refresh
+                        st.rerun()
+
+        # Recalculate active outages right before display
+        active_los = [lo for lo in lo_data if lo.get('status') != 'restored']
 
         if not active_los:
             st.caption("No active long outages.")
