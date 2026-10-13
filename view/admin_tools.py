@@ -10,13 +10,14 @@ import re
 
 cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
 
-# --- HISTORICAL DATA MIGRATION TOOL ---
+# --- UPGRADED HISTORICAL DATA MIGRATION TOOL ---
 def render_migration_tool():
     st.markdown("---")
     st.subheader("📥 Migrate Historical Google Sheet to Supabase")
     st.info("Upload your exported Excel file (.xlsx) here to bulk-insert historical records into your Supabase database.")
     
     uploaded_file = st.file_uploader("Upload your exported Excel file (.xlsx)", type=["xlsx"], key="mig_file")
+    clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Recommended to fix bad dates)")
     
     if uploaded_file and st.button("🚀 Push Historical Data to Supabase", type="primary"):
         try:
@@ -52,6 +53,12 @@ def render_migration_tool():
             valid_columns = list(rename_map.values())
             df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
             
+            # FIX: Force strict Indian Date Parsing so Postgres doesn't flip Days and Months!
+            date_cols = ['receipt_dt', 'placement_dt', 'ul_end_dt', 'release_dt']
+            for col in date_cols:
+                if col in df_mig.columns:
+                    df_mig[col] = df_mig[col].apply(utils.safe_datetime_parse)
+            
             # Use raw SQLAlchemy engine with psycopg2 directly from secrets
             from sqlalchemy import create_engine
             db_secrets = st.secrets["connections"]["supabase"]
@@ -59,9 +66,11 @@ def render_migration_tool():
             
             engine = create_engine(db_url)
             with engine.begin() as connection:
+                if clear_data:
+                    connection.exec_driver_sql("TRUNCATE TABLE rakes_data;")
                 df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
                 
-            st.success("✅ Migration completed successfully! All historical rows are now in Supabase.")
+            st.success("✅ Migration completed successfully! Dates are strictly mapped and data is in chronological order.")
             get_all_excel_data.clear() # Clear cache so new data shows up immediately
         except Exception as e:
             st.error(f"❌ Error during migration: {e}")
@@ -78,6 +87,10 @@ def render_yearly_tab(df_all, today_ist):
                 
                 if filtered_df.empty: st.warning(f"No records for FY {y_only_sel}-{y_only_sel+1}.")
                 else:
+                    # Explicitly sort chronologically by Rake No/Sr No before displaying
+                    if 'sr_no' in filtered_df.columns:
+                        filtered_df = filtered_df.sort_values(by='sr_no', ascending=True)
+                        
                     display_df = filtered_df.drop(columns=[c for c in cols_to_drop if c in filtered_df.columns], errors='ignore')
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                     st.download_button(f"💾 Download FY {y_only_sel}-{y_only_sel+1} Annual", utils.generate_formatted_excel(filtered_df), file_name=f"Annual_Report_FY_{y_only_sel}_{y_only_sel+1}.xlsx")
@@ -192,6 +205,10 @@ def render_bunching_report(df_all, today_ist):
             if filtered_df.empty:
                 st.warning("No rakes found for the selected period.")
                 return
+            
+            # Ensure proper chronological sorting for bunching calculation
+            if 'sr_no' in filtered_df.columns:
+                filtered_df = filtered_df.sort_values(by='sr_no', ascending=True)
 
             df_boxn = df_all[df_all['(BOXN / BOBR)'].astype(str).str.upper().apply(lambda x: 'N' in str(x) and 'R' not in str(x))].copy()
             df_boxn = df_boxn.dropna(subset=['Parsed_DateTime']).sort_values(by='Parsed_DateTime', ascending=True)
