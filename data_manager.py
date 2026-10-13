@@ -15,7 +15,7 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-# --- FAST LOADING & STRICT DD-MM-YYYY HH:MM FORMATTING ---
+# --- FAST LOADING & STRICT DD-MM-YYYY HH:MM FORMATTING (DESCENDING CHRONOLOGICAL) ---
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
     try:
@@ -23,7 +23,6 @@ def get_all_excel_data():
         query = "SELECT * FROM rakes_data"
         df = pd.read_sql(query, con=engine)
         
-        # Drop database primary key ID column if present
         if 'id' in df.columns:
             df = df.drop(columns=['id'])
             
@@ -59,24 +58,14 @@ def get_all_excel_data():
             if 'gcv' in df.columns: df['GCV'] = df['gcv']
             if 'vm' in df.columns: df['VM'] = df['vm']
             
-            def extract_absolute_rake(r_val):
-                try:
-                    parts = str(r_val).split('/')
-                    if len(parts) > 1 and parts[-1].strip().isdigit(): return int(parts[-1].strip())
-                    return 0
-                except: return 0
-                    
-            if 'RAKE No' in df.columns:
-                df['Abs_Counter'] = df['RAKE No'].apply(extract_absolute_rake)
-                df = df.sort_values(by=['Abs_Counter', 'Parsed_DateTime'], ascending=[True, True]).drop(columns=['Abs_Counter'])
-            elif 'Parsed_DateTime' in df.columns:
-                df = df.sort_values(by='Parsed_DateTime', ascending=True)
+            # Strictly sort by Parsed_DateTime descending (newest receipt date/time first) across the entire app
+            if 'Parsed_DateTime' in df.columns:
+                df = df.sort_values(by='Parsed_DateTime', ascending=False)
             
         return df
     except Exception as e:
         return pd.DataFrame()
 
-# --- PRECISE RAKE NUMBERING (+1/+1 & MONTHLY/ANNUAL RESETS) ---
 def get_next_rake_details(df_all, today_ist):
     try:
         if df_all.empty or 'RAKE No' not in df_all.columns:
@@ -132,7 +121,6 @@ def get_next_rake_details(df_all, today_ist):
     except Exception:
         return 1, "01/01"
 
-# --- QUALITY MASTER VLOOKUP LOGIC (4-DIGIT GCV & 2-DIGIT VM) ---
 def lookup_gcv_vm(mine_input, company_input):
     if not os.path.exists(QUALITY_FILE):
         return None, None
