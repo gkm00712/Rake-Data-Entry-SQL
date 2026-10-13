@@ -170,25 +170,22 @@ def save_rake_to_db(entry_dict):
 def load_whiteboard():
     try:
         engine = get_db()
-        query = "SELECT message FROM whiteboard ORDER BY id DESC LIMIT 1"
+        query = "SELECT * FROM whiteboard ORDER BY id DESC LIMIT 1"
         df = pd.read_sql(query, con=engine)
-        if not df.empty and df.iloc[0]['message']:
-            val = df.iloc[0]['message']
-            try: return json.loads(val)
-            except: return [{"text": val, "time": time.time()}]
-        return []
+        if not df.empty:
+            return df.iloc[0].to_dict()
+        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
     except Exception:
-        return []
+        return {"message": "Welcome to CHP-O Data Entry.", "updated_by": "System", "updated_at": ""}
 
-def save_whiteboard(wb_list):
+def save_whiteboard(wb_dict):
     try:
         engine = get_db()
-        json_str = json.dumps(wb_list)
         with engine.begin() as conn:
             conn.exec_driver_sql("TRUNCATE TABLE whiteboard;")
             conn.exec_driver_sql(
-                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, 'System', CURRENT_TIMESTAMP);",
-                (json_str,)
+                "INSERT INTO whiteboard (message, updated_by, updated_at) VALUES (%s, %s, %s);",
+                (wb_dict.get('message', ''), wb_dict.get('updated_by', 'System'), wb_dict.get('updated_at', ''))
             )
         load_whiteboard.clear()
     except Exception as e:
