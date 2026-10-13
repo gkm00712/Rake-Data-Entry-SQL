@@ -13,13 +13,13 @@ cols_to_drop = ['Parsed_DateTime', 'Parsed_Date', 'Loaded_From_Tab']
 def render_migration_tool():
     st.markdown("---")
     st.subheader("📥 Migrate Multi-Tab Master Database to Supabase")
-    st.info("Upload your multi-tab Excel master file (.xlsx) here to bulk-insert all monthly sheets (SEP-26, AUG-26, etc.) into your database.")
+    st.info("Upload your multi-tab Excel master file (.xlsx) here to bulk-insert all monthly sheets into your database.")
     
     uploaded_file = st.file_uploader("Upload Master Database (.xlsx)", type=["xlsx"], key="mig_file")
     clear_data = st.checkbox("⚠️ Clear existing Supabase data before migrating (Recommended)", value=True)
     
     if uploaded_file and st.button("🚀 Push All Tabs to Supabase", type="primary"):
-        with st.spinner("Processing and combining all monthly sheets..."):
+        with st.spinner("Processing, cleaning, and combining all monthly sheets..."):
             try:
                 xls = pd.ExcelFile(uploaded_file)
                 all_sheets_data = []
@@ -49,11 +49,28 @@ def render_migration_tool():
                 valid_columns = list(rename_map.values())
                 df_mig = df_mig[[col for col in df_mig.columns if col in valid_columns]]
                 
-                # Force strict Indian Date Parsing so Postgres doesn't flip Days and Months!
+                # Force strict Indian Date Parsing
                 date_cols = ['receipt_dt', 'placement_dt', 'ul_end_dt', 'release_dt']
                 for col in date_cols:
                     if col in df_mig.columns:
                         df_mig[col] = df_mig[col].apply(utils.safe_datetime_parse)
+                
+                # Robust cleaning for numeric columns to prevent "XXXX" or text conversion crashes
+                numeric_cols = ['sr_no', 'demurrage', 'nth', 'muth', 'wt1', 'wt2', 'wt3', 'wt4', 'gcv', 'vm']
+                for col in numeric_cols:
+                    if col in df_mig.columns:
+                        def clean_numeric(val):
+                            if pd.isna(val): return None
+                            try:
+                                # Extract first valid float/int found in string (e.g. "24 (17:20)" -> 24)
+                                val_str = str(val).strip()
+                                if val_str.upper() in ['XXXX', 'XX', 'NAN', '', 'NONE']: return None
+                                match = re.search(r'[-+]?\d*\.\d+|\d+', val_str)
+                                if match:
+                                    return float(match.group()) if '.' in match.group() else int(match.group())
+                            except: pass
+                            return None
+                        df_mig[col] = df_mig[col].apply(clean_numeric)
                 
                 from sqlalchemy import create_engine
                 db_secrets = st.secrets["connections"]["supabase"]
@@ -65,7 +82,7 @@ def render_migration_tool():
                         connection.exec_driver_sql("TRUNCATE TABLE rakes_data;")
                     df_mig.to_sql('rakes_data', con=connection, if_exists='append', index=False)
                     
-                st.success(f"✅ Successfully migrated {len(df_mig)} total records across {len(xls.sheet_names)} monthly tabs (SEP-26, AUG-26, etc.) into Supabase!")
+                st.success(f"✅ Successfully migrated {len(df_mig)} total records across {len(xls.sheet_names)} monthly tabs into Supabase!")
                 get_all_excel_data.clear() 
             except Exception as e: 
                 st.error(f"❌ Error during multi-tab migration: {e}")
