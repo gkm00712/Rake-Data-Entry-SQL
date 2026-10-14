@@ -43,7 +43,7 @@ def login_screen():
                             st.session_state.logged_in = True
                             st.session_state.role = role
                             st.session_state.username = username
-                            st.rerun()
+                            st.rerun()  # This clears the login form and prevents UI push-down!
                     else: 
                         st.error("❌ Invalid Credentials")
                 else:
