@@ -14,24 +14,39 @@ if not st.session_state.logged_in:
     auth.login_screen()
     st.stop()
 
-# 3. Time Logic
+# 3. Sidebar (Sync & Logout)
+with st.sidebar:
+    st.markdown("### 🚂 CHP Operations")
+    st.markdown(f"👤 **User:** {st.session_state.get('username', 'Operator')}")
+    st.markdown(f"🛡️ **Role:** {st.session_state.get('role', 'User')}")
+    
+    st.markdown("---")
+    if st.button("🔄 Sync Database", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+        
+    if st.button("🚪 Logout", type="primary", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+
+# 4. Time Logic
 now_ist = datetime.now(config.IST)
 today_ist = now_ist.date()
 yesterday_ist = today_ist - timedelta(days=1)
 is_super_admin = (st.session_state.role == "Super Admin")
 min_date_allowed = None if is_super_admin else yesterday_ist
 
-# 4. Global Data Fetch (Fast load for everyday operations)
+# 5. Global Data Fetch (Fast load for everyday operations)
 df_recent = get_recent_excel_data()
 wb_data = load_whiteboard()
 lo_data = load_long_outages()
 
-# 5. Render Header & Notices
+# 6. Render Header & Notices
 notices.render_header(now_ist)
 notices.render_whiteboard(wb_data)
 notices.render_long_outages(lo_data, today_ist, is_super_admin)
 
-# 6. Render Main Tabs
+# 7. Render Main Tabs
 tabs_list = ["📝 Form Dashboard", "📅 Daily Data", "📆 Monthly Data"]
 
 if is_super_admin: 
@@ -39,7 +54,7 @@ if is_super_admin:
 
 tabs = st.tabs(tabs_list)
 
-# Use the fast, recent data (last 300 rakes) for the daily operational tabs
+# Use the fast, recent data (last 500 rakes) for the daily operational tabs
 with tabs[0]:
     form_entry.render_rake_form(df_recent, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data)
 with tabs[1]:
