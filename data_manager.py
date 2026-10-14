@@ -15,53 +15,68 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-# --- FAST LOADING & STRICT DD-MM-YYYY HH:MM FORMATTING ---
+# --- REUSABLE FORMATTING FUNCTION ---
+def format_rake_dataframe(df):
+    if 'id' in df.columns:
+        df = df.drop(columns=['id'])
+        
+    if not df.empty:
+        if 'receipt_dt' in df.columns:
+            df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], errors='coerce')
+            df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
+            df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            
+        if 'placement_dt' in df.columns: 
+            df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+        if 'ul_end_dt' in df.columns: 
+            df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+        if 'release_dt' in df.columns: 
+            df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            
+        if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
+        if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
+            
+        if 'demurrage' in df.columns: df['Demurrage'] = df['demurrage']
+        if 'demurrage_in_rs' in df.columns: df['Demurrage (in Rs)'] = df['demurrage_in_rs']
+        if 'rake_no' in df.columns: df['RAKE No'] = df['rake_no']
+        if 'source' in df.columns: df['Coal siding/ Company'] = df['source']
+        if 'wagon_spec' in df.columns: df['(BOXN / BOBR)'] = df['wagon_spec']
+        if 'remarks' in df.columns: df['REMARKS'] = df['remarks']
+        if 'sr_no' in df.columns: df['Sr. No.'] = df['sr_no']
+        if 'nth' in df.columns: df['NTH'] = df['nth']
+        if 'muth' in df.columns: df['MUTH'] = df['muth']
+        if 'wt1' in df.columns: df['WT-1'] = df['wt1']
+        if 'wt2' in df.columns: df['WT-2'] = df['wt2']
+        if 'wt3' in df.columns: df['WT-3'] = df['wt3']
+        if 'wt4' in df.columns: df['WT-4'] = df['wt4']
+        if 'gcv' in df.columns: df['GCV'] = df['gcv']
+        if 'vm' in df.columns: df['VM'] = df['vm']
+        
+        if 'Parsed_DateTime' in df.columns:
+            df = df.sort_values(by='Parsed_DateTime', ascending=False)
+            
+    return df
+
+# --- FETCH RECENT DATA (FAST) FOR OPERATIONS ---
+@st.cache_data(ttl=600, show_spinner=False)
+def get_recent_excel_data():
+    try:
+        engine = get_db()
+        # Fetches only the last 300 entries (approx. 1+ month of rakes) for instant loading
+        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 300"
+        df = pd.read_sql(query, con=engine)
+        return format_rake_dataframe(df)
+    except Exception as e:
+        return pd.DataFrame()
+
+# --- FETCH ALL DATA (HEAVY) FOR ADMIN REPORTS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
     try:
         engine = get_db()
         query = "SELECT * FROM rakes_data"
         df = pd.read_sql(query, con=engine)
-        
-        if 'id' in df.columns:
-            df = df.drop(columns=['id'])
-            
-        if not df.empty:
-            if 'receipt_dt' in df.columns:
-                df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], errors='coerce')
-                df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
-                df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
-                
-            if 'placement_dt' in df.columns: 
-                df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
-            if 'ul_end_dt' in df.columns: 
-                df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
-            if 'release_dt' in df.columns: 
-                df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
-                
-            if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
-            if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
-                
-            if 'demurrage' in df.columns: df['Demurrage'] = df['demurrage']
-            if 'demurrage_in_rs' in df.columns: df['Demurrage (in Rs)'] = df['demurrage_in_rs']
-            if 'rake_no' in df.columns: df['RAKE No'] = df['rake_no']
-            if 'source' in df.columns: df['Coal siding/ Company'] = df['source']
-            if 'wagon_spec' in df.columns: df['(BOXN / BOBR)'] = df['wagon_spec']
-            if 'remarks' in df.columns: df['REMARKS'] = df['remarks']
-            if 'sr_no' in df.columns: df['Sr. No.'] = df['sr_no']
-            if 'nth' in df.columns: df['NTH'] = df['nth']
-            if 'muth' in df.columns: df['MUTH'] = df['muth']
-            if 'wt1' in df.columns: df['WT-1'] = df['wt1']
-            if 'wt2' in df.columns: df['WT-2'] = df['wt2']
-            if 'wt3' in df.columns: df['WT-3'] = df['wt3']
-            if 'wt4' in df.columns: df['WT-4'] = df['wt4']
-            if 'gcv' in df.columns: df['GCV'] = df['gcv']
-            if 'vm' in df.columns: df['VM'] = df['vm']
-            
-            if 'Parsed_DateTime' in df.columns:
-                df = df.sort_values(by='Parsed_DateTime', ascending=False)
-            
-        return df
+        return format_rake_dataframe(df)
     except Exception as e:
         return pd.DataFrame()
 
@@ -180,6 +195,9 @@ def save_new_rake_entry(entry_dict):
         df_new = pd.DataFrame([db_row])
         with engine.begin() as connection:
             df_new.to_sql('rakes_data', con=connection, if_exists='append', index=False)
+            
+        # Clear BOTH caches so reports and the main screen both update!
+        get_recent_excel_data.clear()
         get_all_excel_data.clear()
         return True
     except Exception as e:
@@ -259,7 +277,6 @@ def save_long_outages(lo_list):
             
             if lo_list:
                 for lo in lo_list:
-                    # Ignore id and created_at so Supabase can generate them
                     excluded_keys = ['id', 'created_at', 'updated_at']
                     clean_lo = {k: v for k, v in lo.items() if k not in excluded_keys}
                     
