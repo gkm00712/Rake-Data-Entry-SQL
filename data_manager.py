@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import os
 import config
@@ -14,31 +14,65 @@ QUALITY_FILE = "quality_data.xlsx"
 def get_db():
     db_secrets = st.secrets["connections"]["supabase"]
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
-    
-    # pool_size and max_overflow keep the connection open so the app loads instantly
     return create_engine(db_url, pool_size=10, max_overflow=20)
 
-# --- BULLETPROOF DATE PARSING & SORTING ---
+# --- STRICT CUSTOM INDIAN DATE PARSER ---
+def parse_indian_date(date_val):
+    if pd.isnull(date_val) or str(date_val).strip() in ['', 'NaT', 'None']:
+        return pd.NaT
+    
+    if isinstance(date_val, datetime):
+        return pd.to_datetime(date_val)
+        
+    date_str = str(date_val).strip()
+    
+    # Clean the string: convert slashes and dots to standardize everything
+    clean_str = date_str.replace('/', ' ').replace('.', '-').replace('T', ' ')
+    
+    # Explicit format checklist. Checks Indian formats FIRST, then SQL standard formats.
+    # This mathematically prevents month/day swapping.
+    formats = [
+        '%d-%m-%Y %H:%M',       # Standard Indian App Input (e.g., 14-10-2026 03:00)
+        '%d-%m-%Y %H:%M:%S',    # Standard Indian with Seconds
+        '%Y-%m-%d %H:%M:%S',    # SQL Database Standard (e.g., 2026-09-12 00:00:00)
+        '%Y-%m-%d %H:%M:%S.%f', # SQL Database Extended
+        '%Y-%m-%d %H:%M',       # SQL Database Short
+        '%d-%m-%Y',             # Date Only Indian
+        '%Y-%m-%d'              # Date Only SQL
+    ]
+    
+    for fmt in formats:
+        try:
+            return pd.to_datetime(datetime.strptime(clean_str, fmt))
+        except ValueError:
+            continue
+            
+    # Absolute fallback for totally mangled strings
+    try:
+        return pd.to_datetime(clean_str, dayfirst=True)
+    except:
+        return pd.NaT
+
+# --- BULLETPROOF FORMATTING ---
 def format_rake_dataframe(df):
     if 'id' in df.columns:
         df = df.drop(columns=['id'])
         
     if not df.empty:
+        # Apply our strict custom parser to all date columns
         if 'receipt_dt' in df.columns:
-            # FIX: Cleans slashes and dots, strictly enforces Indian DD-MM-YYYY format
-            df['Parsed_DateTime'] = df['receipt_dt'].apply(
-                lambda x: pd.to_datetime(str(x).replace('/', ' ').replace('.', '-'), dayfirst=True, errors='coerce') if pd.notnull(x) else pd.NaT
-            )
+            df['Parsed_DateTime'] = df['receipt_dt'].apply(parse_indian_date)
             df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
             df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
         if 'placement_dt' in df.columns: 
-            df['Placement Date/Time'] = df['placement_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' ').replace('.', '-'), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Placement Date/Time'] = df['placement_dt'].apply(parse_indian_date).dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'ul_end_dt' in df.columns: 
-            df['U/L End Date/Time'] = df['ul_end_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' ').replace('.', '-'), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['U/L End Date/Time'] = df['ul_end_dt'].apply(parse_indian_date).dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'release_dt' in df.columns: 
-            df['Rake Rel. Date/Time'] = df['release_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' ').replace('.', '-'), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Rake Rel. Date/Time'] = df['release_dt'].apply(parse_indian_date).dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
+        # Durations are just hours/minutes, so standard pandas is fine here
         if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
         if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
             
@@ -58,7 +92,7 @@ def format_rake_dataframe(df):
         if 'gcv' in df.columns: df['GCV'] = df['gcv']
         if 'vm' in df.columns: df['VM'] = df['vm']
         
-        # Sort completely by accurate timestamp, guaranteeing the absolute newest rake is on top
+        # Sort strictly by the corrected true date
         if 'Parsed_DateTime' in df.columns:
             df = df.sort_values(by='Parsed_DateTime', ascending=False)
             
