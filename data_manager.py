@@ -15,23 +15,27 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-# --- REUSABLE FORMATTING FUNCTION (STRICT INDIAN DATE FORMAT) ---
+# --- BULLETPROOF DATE PARSING & SORTING ---
 def format_rake_dataframe(df):
     if 'id' in df.columns:
         df = df.drop(columns=['id'])
         
     if not df.empty:
         if 'receipt_dt' in df.columns:
-            df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], dayfirst=True, errors='coerce')
+            # FIX: Clean the strings (replace slashes with spaces) and parse every row independently!
+            # This perfectly handles both Excel's "14.10.2026/03:00" and the App's "14-10-2026 03:00"
+            df['Parsed_DateTime'] = df['receipt_dt'].apply(
+                lambda x: pd.to_datetime(str(x).replace('/', ' '), dayfirst=True, errors='coerce') if pd.notnull(x) else pd.NaT
+            )
             df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
             df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
         if 'placement_dt' in df.columns: 
-            df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Placement Date/Time'] = df['placement_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' '), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'ul_end_dt' in df.columns: 
-            df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['U/L End Date/Time'] = df['ul_end_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' '), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'release_dt' in df.columns: 
-            df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Rake Rel. Date/Time'] = df['release_dt'].apply(lambda x: pd.to_datetime(str(x).replace('/', ' '), dayfirst=True, errors='coerce')).dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
         if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
         if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
@@ -52,7 +56,10 @@ def format_rake_dataframe(df):
         if 'gcv' in df.columns: df['GCV'] = df['gcv']
         if 'vm' in df.columns: df['VM'] = df['vm']
         
-        # Note: Python sorting is removed here to preserve the strict Supabase ID order
+        # FIX: Now that all dates are perfectly parsed into true Python DateTime objects, 
+        # we can safely sort by date. The absolute newest rake will ALWAYS be at index 0.
+        if 'Parsed_DateTime' in df.columns:
+            df = df.sort_values(by='Parsed_DateTime', ascending=False)
             
     return df
 
@@ -61,8 +68,8 @@ def format_rake_dataframe(df):
 def get_recent_excel_data():
     try:
         engine = get_db()
-        # Fetch the last 500 records ordered purely by ID (newest first)
-        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 500"
+        # Fetching a larger chunk just in case the imported database IDs were completely randomized
+        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 800"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
     except Exception as e:
@@ -73,7 +80,7 @@ def get_recent_excel_data():
 def get_all_excel_data():
     try:
         engine = get_db()
-        query = "SELECT * FROM rakes_data ORDER BY id DESC"
+        query = "SELECT * FROM rakes_data"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
     except Exception as e:
@@ -91,8 +98,7 @@ def get_next_rake_details(df_all, today_ist):
         if df_clean.empty:
             return 1, "01/01"
             
-        # Since the dataframe is already ordered by ID DESC from the database,
-        # row 0 is guaranteed to be the most recently added rake.
+        # The dataframe is already strictly sorted by the true Date/Time in format_rake_dataframe
         last_row = df_clean.iloc[0] 
         last_rake = str(last_row.get('RAKE No', ''))
         last_date = last_row.get('Parsed_Date')
