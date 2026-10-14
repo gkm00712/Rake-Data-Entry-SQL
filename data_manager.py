@@ -15,23 +15,24 @@ def get_db():
     db_url = f"postgresql+psycopg2://{db_secrets['username']}:{db_secrets['password']}@{db_secrets['host']}:{db_secrets['port']}/{db_secrets['database']}"
     return create_engine(db_url)
 
-# --- REUSABLE FORMATTING FUNCTION ---
+# --- REUSABLE FORMATTING FUNCTION (STRICT INDIAN DATE FORMAT) ---
 def format_rake_dataframe(df):
     if 'id' in df.columns:
         df = df.drop(columns=['id'])
         
     if not df.empty:
         if 'receipt_dt' in df.columns:
-            df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], errors='coerce')
+            # Enforcing dayfirst=True for strict DD-MM-YYYY parsing
+            df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], dayfirst=True, errors='coerce')
             df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
             df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
         if 'placement_dt' in df.columns: 
-            df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Placement Date/Time'] = pd.to_datetime(df['placement_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'ul_end_dt' in df.columns: 
-            df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['U/L End Date/Time'] = pd.to_datetime(df['ul_end_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
         if 'release_dt' in df.columns: 
-            df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
+            df['Rake Rel. Date/Time'] = pd.to_datetime(df['release_dt'], dayfirst=True, errors='coerce').dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
         if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
         if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
@@ -62,8 +63,8 @@ def format_rake_dataframe(df):
 def get_recent_excel_data():
     try:
         engine = get_db()
-        # Fetches only the last 300 entries (approx. 1+ month of rakes) for instant loading
-        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 300"
+        # Fetch the last 500 records to ensure we capture all recent dates accurately
+        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 500"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
     except Exception as e:
@@ -196,7 +197,6 @@ def save_new_rake_entry(entry_dict):
         with engine.begin() as connection:
             df_new.to_sql('rakes_data', con=connection, if_exists='append', index=False)
             
-        # Clear BOTH caches so reports and the main screen both update!
         get_recent_excel_data.clear()
         get_all_excel_data.clear()
         return True
