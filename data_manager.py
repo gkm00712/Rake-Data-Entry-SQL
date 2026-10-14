@@ -29,7 +29,6 @@ def parse_indian_date(date_val):
     # Clean the string: convert slashes and dots to standardize everything
     clean_str = date_str.replace('/', ' ').replace('.', '-').replace('T', ' ')
     
-    # Explicit format checklist. Checks Indian formats FIRST, then SQL standard formats.
     formats = [
         '%d-%m-%Y %H:%M',       # Standard Indian App Input
         '%d-%m-%Y %H:%M:%S',    # Standard Indian with Seconds
@@ -46,7 +45,6 @@ def parse_indian_date(date_val):
         except ValueError:
             continue
             
-    # Absolute fallback for totally mangled strings
     try:
         return pd.to_datetime(clean_str, dayfirst=True)
     except:
@@ -89,7 +87,6 @@ def format_rake_dataframe(df):
         if 'gcv' in df.columns: df['GCV'] = df['gcv']
         if 'vm' in df.columns: df['VM'] = df['vm']
         
-        # Sort strictly by true chronological date, IGNORING the database ID
         if 'Parsed_DateTime' in df.columns:
             df = df.sort_values(by='Parsed_DateTime', ascending=False)
             
@@ -99,6 +96,7 @@ def format_rake_dataframe(df):
 def get_all_excel_data():
     try:
         engine = get_db()
+        # Full historical fetch: Only triggers when required by Monthly/Yearly tabs
         query = "SELECT * FROM rakes_data"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
@@ -108,11 +106,14 @@ def get_all_excel_data():
 @st.cache_data(ttl=600, show_spinner=False)
 def get_recent_excel_data():
     try:
-        # Guarantee we get the perfectly sorted dataset based on real dates, 
-        # then strictly slice the TOP 50 for instantaneous UI loading.
-        df = get_all_excel_data()
-        if not df.empty:
-            return df.head(50)
+        engine = get_db()
+        # FETCH ONLY 200 ROWS: Fast and lightweight, bypassing slight ID scrambles
+        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 200"
+        df = pd.read_sql(query, con=engine)
+        df_formatted = format_rake_dataframe(df)
+        if not df_formatted.empty:
+            # Strictly return only the top 50 most recent rakes for the UI
+            return df_formatted.head(50)
         return pd.DataFrame()
     except Exception as e:
         return pd.DataFrame()
