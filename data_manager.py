@@ -22,7 +22,6 @@ def format_rake_dataframe(df):
         
     if not df.empty:
         if 'receipt_dt' in df.columns:
-            # Enforcing dayfirst=True for strict DD-MM-YYYY parsing
             df['Parsed_DateTime'] = pd.to_datetime(df['receipt_dt'], dayfirst=True, errors='coerce')
             df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
             df['Receipt Date/Time'] = df['Parsed_DateTime'].dt.strftime('%d-%m-%Y %H:%M').fillna('')
@@ -53,8 +52,7 @@ def format_rake_dataframe(df):
         if 'gcv' in df.columns: df['GCV'] = df['gcv']
         if 'vm' in df.columns: df['VM'] = df['vm']
         
-        if 'Parsed_DateTime' in df.columns:
-            df = df.sort_values(by='Parsed_DateTime', ascending=False)
+        # Note: Python sorting is removed here to preserve the strict Supabase ID order
             
     return df
 
@@ -63,7 +61,7 @@ def format_rake_dataframe(df):
 def get_recent_excel_data():
     try:
         engine = get_db()
-        # Fetch the last 500 records to ensure we capture all recent dates accurately
+        # Fetch the last 500 records ordered purely by ID (newest first)
         query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 500"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
@@ -75,7 +73,7 @@ def get_recent_excel_data():
 def get_all_excel_data():
     try:
         engine = get_db()
-        query = "SELECT * FROM rakes_data"
+        query = "SELECT * FROM rakes_data ORDER BY id DESC"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
     except Exception as e:
@@ -93,9 +91,8 @@ def get_next_rake_details(df_all, today_ist):
         if df_clean.empty:
             return 1, "01/01"
             
-        if 'Parsed_DateTime' in df_clean.columns:
-            df_clean = df_clean.sort_values(by='Parsed_DateTime', ascending=False)
-            
+        # Since the dataframe is already ordered by ID DESC from the database,
+        # row 0 is guaranteed to be the most recently added rake.
         last_row = df_clean.iloc[0] 
         last_rake = str(last_row.get('RAKE No', ''))
         last_date = last_row.get('Parsed_Date')
