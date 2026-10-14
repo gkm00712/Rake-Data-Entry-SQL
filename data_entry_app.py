@@ -14,17 +14,15 @@ if not st.session_state.logged_in:
     auth.login_screen()
     st.stop()
 
-# 3. Sidebar (Sync & Logout)
-with st.sidebar:
-    st.markdown("### 🚂 CHP Operations")
-    st.markdown(f"👤 **User:** {st.session_state.get('username', 'Operator')}")
-    st.markdown(f"🛡️ **Role:** {st.session_state.get('role', 'User')}")
-    
-    st.markdown("---")
+# 3. Top Action Bar (Always visible on mobile & desktop!)
+c1, c2, c3 = st.columns([4, 1.5, 1.5])
+with c1:
+    st.markdown(f"👤 **User:** {st.session_state.get('username', 'Operator')} | 🛡️ **Role:** {st.session_state.get('role', 'User')}")
+with c2:
     if st.button("🔄 Sync Database", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-        
+with c3:
     if st.button("🚪 Logout", type="primary", use_container_width=True):
         st.session_state.clear()
         st.rerun()
