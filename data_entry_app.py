@@ -14,7 +14,7 @@ if not st.session_state.logged_in:
     auth.login_screen()
     st.stop()
 
-# 3. Top Action Bar (Always visible on mobile & desktop!)
+# 3. Top Action Bar (Always visible!)
 c1, c2, c3 = st.columns([4, 1.5, 1.5])
 with c1:
     st.markdown(f"👤 **User:** {st.session_state.get('username', 'Operator')} | 🛡️ **Role:** {st.session_state.get('role', 'User')}")
@@ -27,6 +27,8 @@ with c3:
         st.session_state.clear()
         st.rerun()
 
+st.markdown("---")
+
 # 4. Time Logic
 now_ist = datetime.now(config.IST)
 today_ist = now_ist.date()
@@ -34,7 +36,7 @@ yesterday_ist = today_ist - timedelta(days=1)
 is_super_admin = (st.session_state.role == "Super Admin")
 min_date_allowed = None if is_super_admin else yesterday_ist
 
-# 5. Global Data Fetch (Fast load for everyday operations)
+# 5. Global Data Fetch (Fast load for everyday operations - EXACTLY 50 rows)
 df_recent = get_recent_excel_data()
 wb_data = load_whiteboard()
 lo_data = load_long_outages()
@@ -52,18 +54,18 @@ if is_super_admin:
 
 tabs = st.tabs(tabs_list)
 
-# Use the fast, recent data for the daily operational tabs
+# Use the fast, restricted 50-row data for the main entry and daily checks
 with tabs[0]:
     form_entry.render_rake_form(df_recent, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data)
 with tabs[1]:
     reports.render_daily_tab(df_recent, today_ist)
-with tabs[2]:
-    reports.render_monthly_tab(df_recent, today_ist)
 
-# Only fetch the massive historical database if the user is an admin accessing admin tabs
-if is_super_admin:
+# Load the heavy historical data (df_all) ONLY for Monthly and Admin Tabs
+with tabs[2]:
     df_all = get_all_excel_data()
-    
+    reports.render_monthly_tab(df_all, today_ist)
+
+if is_super_admin:
     with tabs[3]:
         admin_tools.render_yearly_tab(df_all, today_ist)
     with tabs[4]:
