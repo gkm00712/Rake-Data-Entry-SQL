@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import config
 import auth
-from data_manager import get_all_excel_data, load_whiteboard, load_long_outages
+from data_manager import get_recent_excel_data, get_all_excel_data, load_whiteboard, load_long_outages
 from view import notices, form_entry, reports, admin_tools
 
 # 1. Setup & Init
@@ -21,8 +21,8 @@ yesterday_ist = today_ist - timedelta(days=1)
 is_super_admin = (st.session_state.role == "Super Admin")
 min_date_allowed = None if is_super_admin else yesterday_ist
 
-# 4. Global Data Fetch
-df_all = get_all_excel_data()
+# 4. Global Data Fetch (Fast load for everyday operations)
+df_recent = get_recent_excel_data()
 wb_data = load_whiteboard()
 lo_data = load_long_outages()
 
@@ -39,14 +39,18 @@ if is_super_admin:
 
 tabs = st.tabs(tabs_list)
 
+# Use the fast, recent data (last 300 rakes) for the daily operational tabs
 with tabs[0]:
-    form_entry.render_rake_form(df_all, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data)
+    form_entry.render_rake_form(df_recent, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data)
 with tabs[1]:
-    reports.render_daily_tab(df_all, today_ist)
+    reports.render_daily_tab(df_recent, today_ist)
 with tabs[2]:
-    reports.render_monthly_tab(df_all, today_ist)
+    reports.render_monthly_tab(df_recent, today_ist)
 
+# Only fetch the massive historical database if the user is an admin accessing admin tabs
 if is_super_admin:
+    df_all = get_all_excel_data()
+    
     with tabs[3]:
         admin_tools.render_yearly_tab(df_all, today_ist)
     with tabs[4]:
