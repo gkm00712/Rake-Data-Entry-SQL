@@ -54,7 +54,7 @@ if is_super_admin:
 
 tabs = st.tabs(tabs_list)
 
-# Use the fast, recent data (last 500 rakes) for the daily operational tabs
+# Use the fast, recent data for the daily operational tabs
 with tabs[0]:
     form_entry.render_rake_form(df_recent, now_ist, today_ist, min_date_allowed, is_super_admin, lo_data)
 with tabs[1]:
