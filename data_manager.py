@@ -18,7 +18,7 @@ def get_db():
 
 # --- STRICT CUSTOM INDIAN DATE PARSER ---
 def parse_indian_date(date_val):
-    if pd.isnull(date_val) or str(date_val).strip() in ['', 'NaT', 'None']:
+    if pd.isnull(date_val) or str(date_val).strip() in ['', 'NaT', 'None', 'nan']:
         return pd.NaT
     
     if isinstance(date_val, datetime):
@@ -30,11 +30,10 @@ def parse_indian_date(date_val):
     clean_str = date_str.replace('/', ' ').replace('.', '-').replace('T', ' ')
     
     # Explicit format checklist. Checks Indian formats FIRST, then SQL standard formats.
-    # This mathematically prevents month/day swapping.
     formats = [
-        '%d-%m-%Y %H:%M',       # Standard Indian App Input (e.g., 14-10-2026 03:00)
+        '%d-%m-%Y %H:%M',       # Standard Indian App Input
         '%d-%m-%Y %H:%M:%S',    # Standard Indian with Seconds
-        '%Y-%m-%d %H:%M:%S',    # SQL Database Standard (e.g., 2026-09-12 00:00:00)
+        '%Y-%m-%d %H:%M:%S',    # SQL Database Standard
         '%Y-%m-%d %H:%M:%S.%f', # SQL Database Extended
         '%Y-%m-%d %H:%M',       # SQL Database Short
         '%d-%m-%Y',             # Date Only Indian
@@ -59,7 +58,6 @@ def format_rake_dataframe(df):
         df = df.drop(columns=['id'])
         
     if not df.empty:
-        # Apply our strict custom parser to all date columns
         if 'receipt_dt' in df.columns:
             df['Parsed_DateTime'] = df['receipt_dt'].apply(parse_indian_date)
             df['Parsed_Date'] = df['Parsed_DateTime'].dt.date
@@ -72,7 +70,6 @@ def format_rake_dataframe(df):
         if 'release_dt' in df.columns: 
             df['Rake Rel. Date/Time'] = df['release_dt'].apply(parse_indian_date).dt.strftime('%d-%m-%Y %H:%M').fillna('')
             
-        # Durations are just hours/minutes, so standard pandas is fine here
         if 'u_duration' in df.columns: df['Unloading Duration'] = pd.to_datetime(df['u_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
         if 'r_duration' in df.columns: df['Cycle Time'] = pd.to_datetime(df['r_duration'].astype(str), errors='coerce').dt.strftime('%H:%M').fillna('')
             
@@ -92,21 +89,11 @@ def format_rake_dataframe(df):
         if 'gcv' in df.columns: df['GCV'] = df['gcv']
         if 'vm' in df.columns: df['VM'] = df['vm']
         
-        # Sort strictly by the corrected true date
+        # Sort strictly by true chronological date, IGNORING the database ID
         if 'Parsed_DateTime' in df.columns:
             df = df.sort_values(by='Parsed_DateTime', ascending=False)
             
     return df
-
-@st.cache_data(ttl=600, show_spinner=False)
-def get_recent_excel_data():
-    try:
-        engine = get_db()
-        query = "SELECT * FROM rakes_data ORDER BY id DESC LIMIT 500"
-        df = pd.read_sql(query, con=engine)
-        return format_rake_dataframe(df)
-    except Exception as e:
-        return pd.DataFrame()
 
 @st.cache_data(ttl=600, show_spinner=False)
 def get_all_excel_data():
@@ -115,6 +102,18 @@ def get_all_excel_data():
         query = "SELECT * FROM rakes_data"
         df = pd.read_sql(query, con=engine)
         return format_rake_dataframe(df)
+    except Exception as e:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_recent_excel_data():
+    try:
+        # Guarantee we get the perfectly sorted dataset based on real dates, 
+        # then strictly slice the TOP 50 for instantaneous UI loading.
+        df = get_all_excel_data()
+        if not df.empty:
+            return df.head(50)
+        return pd.DataFrame()
     except Exception as e:
         return pd.DataFrame()
 
